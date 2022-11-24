@@ -90,7 +90,7 @@ impl Vote {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 enum VoteType {
     Vote,
     Commit,
@@ -176,7 +176,9 @@ struct Election {
     hash: Hash,
     votes: HashMap<u32, Vec<Vote>>,
     is_decided: bool,
-    tally: HashMap<u64, u64>,
+    vote_tally: HashMap<u64, u64>,
+    commit_tally: HashMap<u64, u64>,
+    current_value: u64,
 }
 
 impl Election {
@@ -184,12 +186,14 @@ impl Election {
         Election {
             hash,
             is_decided: false,
-            tally: HashMap::new(),
+            vote_tally: HashMap::new(),
+            commit_tally: HashMap::new(),
             votes: HashMap::new(),
+            current_value: 0,
         }
     }
 
-    fn insert_vote(&mut self, vote: Vote) {
+    fn insert_vote(&mut self, vote: Vote, own_vote: bool) {
         let mut votes: Vec<Vote> = Vec::new();
         match self.votes.get(&vote.round) {
             Some(v) => {
@@ -201,15 +205,27 @@ impl Election {
             }
         }
         self.votes.insert(vote.round, votes);
+        self.tally_votes(&vote.round);
+        if own_vote {
+            self.current_value = vote.value;
+        }
     }
 
     fn tally_votes(&mut self, round: &u32) {
         let votes = self.votes.get(round).unwrap();
         for vote in votes.iter() {
-            match self.tally.get(&vote.value) {
-                Some(count) => self.tally.insert(vote.value, count + 1),
-                None => self.tally.insert(vote.value, 1)
-            };
+            if vote.vote_type == VoteType::Vote {
+                match self.vote_tally.get(&vote.value) {
+                    Some(count) => self.vote_tally.insert(vote.value, count + 1),
+                    None => self.vote_tally.insert(vote.value, 1)
+                };
+            }
+            else {
+                match self.commit_tally.get(&vote.value) {
+                    Some(count) => self.vote_tally.insert(vote.value, count + 1),
+                    None => self.vote_tally.insert(vote.value, 1)
+                };
+            }
         }
     }
 }
@@ -233,7 +249,6 @@ impl Node {
     }
 
     fn handle_message(&mut self, origin: u64, msg: &Message) {
-
         match msg {
             Message::Vote(vote) => self.handle_query(origin, vote),
             Message::Transaction(tx) => self.handle_transaction(tx),
@@ -244,22 +259,48 @@ impl Node {
         if self.decided.contains_key(&vote.hash) {
             return;
         }
-        let mut election = Election::new(vote.hash.clone());
-        election.insert_vote(vote.clone());
-        election.tally_votes(&vote.round);
         if !self.mempool.contains_key(&vote.hash) {
+            let mut election = Election::new(vote.hash.clone());
+            election.insert_vote(vote.clone(), false);
             let mut own_vote = vote.clone();
             own_vote.round = 0;
             own_vote.vote_type = VoteType::Vote;
             self.send_query(own_vote.clone());
-            election.insert_vote(own_vote.clone());
-            election.tally_votes(&vote.round);
+            election.insert_vote(own_vote.clone(), true);
         }
         else {
+            let mut election = self.mempool.get(&vote.hash).unwrap().clone();
             let votes = election.votes.get(&vote.round).unwrap();
             if votes.len() > QUORUM {
-
+                let mut bool = false;
+                for value in election.vote_tally.values() {
+                    if value > &(SEMI_QUORUM as u64) {
+                        bool = true;
+                    }
+                }
+                if election.vote_tally.get(&vote.value).unwrap() > &(QUORUM as u64) {
+                    let next_round_vote = Vote::new(vote.hash.clone(), vote.round + 1, vote.value, VoteType::Commit);
+                    election.insert_vote(next_round_vote, true);
+                }
+                else if election.commit_tally.get(&vote.value).unwrap() > &(QUORUM as u64)  {
+                    election.is_decided = true;
+                    self.decided.insert(vote.hash.clone(), vote.value);
+                    return;
+                }
+                else if election.commit_tally.get(&0).unwrap() > &(SEMI_QUORUM as u64)  {
+                    let next_round_vote = Vote::new(vote.hash.clone(), vote.round + 1, 0, VoteType::Vote);
+                    election.insert_vote(next_round_vote, true);
+                }
+                else if bool {
+                    let next_round_vote = Vote::new(vote.hash.clone(), vote.round + 1, election.current_value, VoteType::Vote);
+                    election.insert_vote(next_round_vote, true);
+                }
+                else if !bool {
+                    let next_round_vote = Vote::new(vote.hash.clone(), vote.round + 1, 0, VoteType::Vote);
+                    election.insert_vote(next_round_vote, true);
+                }
             }
+            self.mempool.insert(vote.hash.clone(), election);
         }
     }
 
