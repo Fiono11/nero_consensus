@@ -36,10 +36,10 @@ fn main() {
         let node = net.nodes.get_mut(&id).unwrap();
         node.lock()
             .unwrap()
-            .handle_message(0, &Message::Transaction(tx.clone()));
+            .handle_message(&Message::Transaction(tx.clone()));
         hashes.insert(tx.hash());
 
-        thread::sleep_ms(500);
+        //thread::sleep_ms(500);
     }
 
     loop {
@@ -76,40 +76,50 @@ impl ::std::fmt::Debug for Hash {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Ord, PartialOrd, Eq, PartialEq)]
 enum Message {
     Vote(Vote),
     Transaction(Transaction),
     TimerExpired(Vote),
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Ord, PartialOrd, Eq, PartialEq, Copy)]
+struct NodeId(u64);
+
+#[derive(Debug, Clone, Ord, PartialOrd, Eq, PartialEq, Copy, Hash)]
+struct Round(u32);
+
+#[derive(Debug, Clone, Ord, PartialOrd, Eq, PartialEq, Copy, Hash)]
+struct Value(u64);
+
+#[derive(Debug, Clone, Ord, PartialOrd, Eq, PartialEq)]
 struct Vote {
+    signer: NodeId,
     vote_hash: VoteHash,
-    round: u32,
-    value: u64,
+    round: Round,
+    value: Value,
     vote_type: VoteType,
-    proof: Option<Vec<VoteHash>>,
+    proof: Option<BTreeSet<VoteHash>>,
     election_hash: ElectionHash,
 }
 
-fn vote_hash(round: u32, value: u64) -> VoteHash {
+fn vote_hash(round: Round, value: Value) -> VoteHash {
     let mut buf = vec![];
-    buf.write_u32::<LittleEndian>(round).unwrap();
-    buf.write_u64::<LittleEndian>(value).unwrap();
+    buf.write_u32::<LittleEndian>(round.0).unwrap();
+    buf.write_u64::<LittleEndian>(value.0).unwrap();
     let digest = digest::digest(&digest::SHA256, &buf);
     VoteHash(Hash(digest.as_ref().to_vec()))
 }
 
 impl Vote {
-    fn new(vote_hash: VoteHash, round: u32, value: u64, vote_type: VoteType, proof: Option<Vec<VoteHash>>, election_hash: ElectionHash) -> Self {
-        Self { vote_hash, round, value, vote_type, proof, election_hash }
+    fn new(signer: NodeId, vote_hash: VoteHash, round: Round, value: Value, vote_type: VoteType, proof: Option<BTreeSet<VoteHash>>, election_hash: ElectionHash) -> Self {
+        Self { signer, vote_hash, round, value, vote_type, proof, election_hash }
     }
 
     fn serialize(&self) -> Vec<u8> {
         let mut buf = vec![];
-        buf.write_u32::<LittleEndian>(self.round).unwrap();
-        buf.write_u64::<LittleEndian>(self.value).unwrap();
+        buf.write_u32::<LittleEndian>(self.round.0).unwrap();
+        buf.write_u64::<LittleEndian>(self.value.0).unwrap();
         buf
     }
 
@@ -119,15 +129,15 @@ impl Vote {
     }
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, Ord, PartialOrd, Eq, PartialEq)]
 enum VoteType {
     Vote,
     Commit,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Ord, PartialOrd, Eq, PartialEq)]
 struct Transaction {
-    nonce: u64,
+    nonce: Value,
     data: i32,
 }
 
@@ -141,7 +151,7 @@ impl Transaction {
     fn random() -> Self {
         let mut rng = thread_rng();
         Transaction {
-            nonce: rand::random::<u64>(),
+            nonce: Value(rand::random::<u64>()),
             data: rng.gen_range(0, 10),
         }
     }
@@ -161,7 +171,7 @@ impl Transaction {
 #[derive(Debug)]
 struct Network {
     nodes: HashMap<u64, Arc<Mutex<Node>>>,
-    receiver: Arc<Mutex<Receiver<(u64, Message)>>>,
+    receiver: Arc<Mutex<Receiver<(NodeId, Message)>>>,
 }
 
 impl Network {
@@ -169,7 +179,7 @@ impl Network {
         let (sender, receiver) = channel();
         Network {
             nodes: (0..NUMBER_OF_TOTAL_NODES as u64)
-                .map(|id| (id, Arc::new(Mutex::new(Node::new(id as u64, Arc::new(Mutex::new(sender.clone())))))))
+                .map(|id| (id, Arc::new(Mutex::new(Node::new(NodeId(id), Arc::new(Mutex::new(sender.clone())))))))
                 .collect(),
             receiver: Arc::new(Mutex::new(receiver)),
         }
@@ -195,18 +205,18 @@ impl Network {
                                 .unwrap()
                                 .lock()
                                 .unwrap()
-                                .handle_message(origin, &msg)
+                                .handle_message(&msg)
                         })
                         .collect::<Vec<_>>();
                 }
                 Message::TimerExpired(ref _msg) => {
                     for id in ids {
-                        if id == origin {
+                        if id == origin.0 {
                             nodes.get_mut(&id)
                                 .unwrap()
                                 .lock()
                                 .unwrap()
-                                .handle_message(origin, &msg)
+                                .handle_message(&msg)
                         }
                     }
                 }
@@ -220,15 +230,15 @@ impl Network {
 #[derive(Debug, Clone)]
 struct Election {
     hash: ElectionHash,
-    votes: HashMap<u32, Vec<Vote>>,
+    votes: HashMap<Round, BTreeSet<Vote>>,
     vote_by_hash: HashMap<VoteHash, Vote>,
     is_decided: bool,
-    vote_tally: HashMap<u64, u64>,
-    commit_tally: HashMap<u64, u64>,
-    current_value: u64,
+    vote_tally: HashMap<Value, u64>,
+    commit_tally: HashMap<Value, u64>,
+    current_value: Value,
     timed_out: bool,
-    unvalidated_votes: HashMap<Vote, Vec<Vote>>,
-    voted: bool,
+    unvalidated_votes: HashMap<Vote, BTreeSet<Vote>>,
+    voted: BTreeSet<Round>,
 }
 
 impl Election {
@@ -239,130 +249,130 @@ impl Election {
             vote_tally: HashMap::new(),
             commit_tally: HashMap::new(),
             votes: HashMap::new(),
-            current_value: 0,
+            current_value: Value(0),
             vote_by_hash: HashMap::new(),
             unvalidated_votes: HashMap::new(),
             timed_out: false,
-            voted: false,
+            voted: BTreeSet::new(),
         }
     }
 
     fn insert_vote(&mut self, vote: Vote, own_vote: bool) {
-        let mut votes: Vec<Vote> = Vec::new();
+        let mut votes: BTreeSet<Vote> = BTreeSet::new();
         match self.votes.get(&vote.round) {
             Some(v) => {
-                votes = v.to_vec();
-                votes.push(vote.clone())
+                votes.insert(vote.clone());
             }
             None => {
-                votes.push(vote.clone())
+                votes.insert(vote.clone());
             }
         }
         self.votes.insert(vote.round, votes);
         self.tally_votes(&vote.round);
         if own_vote {
             self.current_value = vote.value;
+            self.voted.insert(vote.round);
         }
     }
 
-    fn tally_votes(&mut self, round: &u32) {
+    fn tally_votes(&mut self, round: &Round) {
         let votes = self.votes.get(round).unwrap();
         for vote in votes.iter() {
             if vote.vote_type == VoteType::Vote {
                 match self.vote_tally.get(&vote.value) {
                     Some(count) => self.vote_tally.insert(vote.value, count + 1),
-                    None => self.vote_tally.insert(vote.value, 1)
+                    None => self.vote_tally.insert(vote.value, 1),
                 };
             }
             else {
                 match self.commit_tally.get(&vote.value) {
-                    Some(count) => self.vote_tally.insert(vote.value, count + 1),
-                    None => self.vote_tally.insert(vote.value, 1)
+                    Some(count) => self.commit_tally.insert(vote.value, count + 1),
+                    None => self.commit_tally.insert(vote.value, 1),
                 };
             }
         }
     }
 
-    fn validate_vote(&self, vote: Vote) -> bool {
-        if vote.round != 0 {
-            for hash in vote.proof.unwrap().iter() {
+    fn validate_vote(&mut self, vote: Vote) {
+        let mut valid = true;
+        if vote.round != Round(0) {
+            for hash in vote.clone().proof.unwrap().iter() {
                 if !self.vote_by_hash.contains_key(&hash) {
-                    return false;
+                    valid = false;
                 }
             }
         }
-        true
+        if valid {
+            self.insert_vote(vote.clone(), false);
+        }
     }
 }
 
 #[derive(Debug, Clone)]
 struct Node {
-    mempool: HashMap<ElectionHash, Election>,
-    id: u64,
-    sender: Arc<Mutex<Sender<(u64, Message)>>>,
-    decided: HashMap<ElectionHash, u64>,
+    elections: HashMap<ElectionHash, Election>,
+    id: NodeId,
+    sender: Arc<Mutex<Sender<(NodeId, Message)>>>,
+    decided: HashMap<ElectionHash, Value>,
 }
 
 impl Node {
-    fn new(id: u64, sender: Arc<Mutex<Sender<(u64, Message)>>>) -> Self {
+    fn new(id: NodeId, sender: Arc<Mutex<Sender<(NodeId, Message)>>>) -> Self {
         Node {
             id,
             sender,
-            mempool: HashMap::new(),
+            elections: HashMap::new(),
             decided: HashMap::new(),
         }
     }
 
-    fn handle_message(&mut self, origin: u64, msg: &Message) {
+    fn handle_message(&mut self, msg: &Message) {
         match msg {
-            Message::Vote(vote) => self.handle_vote(origin, vote),
+            Message::Vote(vote) => self.handle_vote(vote),
             Message::Transaction(tx) => self.handle_transaction(tx),
             Message::TimerExpired(vote) => self.handle_timeout(vote),
         }
     }
 
-    fn handle_vote(&mut self, origin: u64, vote: &Vote) {
-        if self.decided.contains_key(&vote.election_hash) {
+    fn handle_vote(&mut self, vote: &Vote) {
+        println!("Node {:?} received from node {:?} vote {:#?}", self.id, vote.signer, vote);
+        if self.decided.contains_key(&vote.election_hash) || vote.signer == self.id {
             return;
         }
-        if !self.mempool.contains_key(&vote.election_hash) {
-            let mut election = Election::new(vote.election_hash.clone());
-            election.insert_vote(vote.clone(), false);
+        let mut election = Election::new(vote.election_hash.clone());
+        match self.elections.get(&vote.election_hash) {
+            Some(e) => election = e.clone(),
+            None => ()//set_timeout(self.clone(), vote.clone()),
+        }
+        election.validate_vote(vote.clone());
+        if let None = election.voted.get(&vote.round) {
             let mut own_vote = vote.clone();
-            own_vote.round = 0;
+            own_vote.round = Round(0);
             own_vote.vote_type = VoteType::Vote;
             election.insert_vote(own_vote.clone(), true);
-            //set_timeout(self.clone(), vote.clone());
-            self.send_vote(own_vote.clone(), election);
+            self.send_vote(own_vote.clone(), election.clone());
         }
-        else {
-            let mut election = self.mempool.get(&vote.election_hash).unwrap().clone();
-            let mut valid = true;
-            if vote.round != 0 {
-                valid = election.validate_vote(vote.clone());
-            }
-            if valid && !election.voted {
-                let votes = election.votes.get(&vote.round).unwrap();
-                if votes.len() > QUORUM && election.timed_out {
-                    self.decide_vote(election, vote.value, vote.vote_hash.clone(), vote.round);
-                }
-            }
+        self.elections.insert(election.clone().hash, election.clone());
+        let binding = election.clone();
+        let votes = binding.votes.get(&vote.round).unwrap();
+        if votes.len() > QUORUM && election.clone().timed_out {
+            self.decide_vote(election.clone(), vote.value, vote.round);
         }
     }
 
-    fn decide_vote(&mut self, mut election: Election, value: u64, hash: VoteHash, round: u32) {
-        let mut highest_value = 0;
+    fn decide_vote(&mut self, mut election: Election, value: Value, round: Round) {
+        let mut highest_value = Value(0);
         let mut bool = false;
         for v in election.vote_tally.values() {
             if v > &(SEMI_QUORUM as u64) {
                 bool = true;
             }
-            if v > &highest_value {
-                highest_value = *v;
+            if v > &(highest_value.0 as u64) {
+                highest_value = Value(*v);
             }
         }
-        let proof: Option<Vec<VoteHash>> = Some(election.votes.get(&round).unwrap().iter().map(|vote| vote.hash()).collect());
-        let mut next_round_vote = Vote::new(vote_hash(round + 1, value), round + 1, value, VoteType::Commit, proof, election.hash.clone());
+        let proof: Option<BTreeSet<VoteHash>> = Some(election.votes.get(&round).unwrap().iter().map(|vote| vote.hash()).collect());
+        let mut next_round_vote = Vote::new(self.id, vote_hash(Round(round.0 + 1), value), Round(round.0 + 1), value, VoteType::Commit, proof, election.hash.clone());
         if election.vote_tally.get(&value).unwrap() > &(QUORUM as u64) {
 
         }
@@ -371,8 +381,8 @@ impl Node {
             self.decided.insert(election.hash.clone(), value);
             return;
         }
-        else if election.commit_tally.get(&0).unwrap() > &(SEMI_QUORUM as u64)  {
-            next_round_vote.value = 0;
+        else if election.commit_tally.get(&Value(0)).unwrap() > &(SEMI_QUORUM as u64)  {
+            next_round_vote.value = Value(0);
             next_round_vote.vote_type = VoteType::Vote;
         }
         else if bool {
@@ -380,7 +390,7 @@ impl Node {
             next_round_vote.vote_type = VoteType::Vote;
         }
         else if !bool {
-            next_round_vote.value = 0;
+            next_round_vote.value = Value(0);
             next_round_vote.vote_type = VoteType::Vote;
         }
         else {
@@ -389,61 +399,60 @@ impl Node {
         }
         election.insert_vote(next_round_vote.clone(), true);
         election.timed_out = false;
-        election.voted = true;
-        self.mempool.insert(election.hash.clone(), election.clone());
+        election.voted.insert(next_round_vote.round);
+        self.elections.insert(election.hash.clone(), election.clone());
         self.send_vote(next_round_vote.clone(), election.clone());
     }
 
     // fn first_vote
 
     fn handle_timeout(&mut self, vote: &Vote) {
-        if !self.mempool.contains_key(&vote.election_hash.clone()) {
-            let vote = Vote::new(vote_hash(0, vote.value),0, vote.value,VoteType::Vote, None, vote.election_hash.clone());
+        if !self.elections.contains_key(&vote.election_hash.clone()) {
+            let vote = Vote::new(self.id.clone(), vote_hash(Round(0), vote.value),Round(0), vote.value,VoteType::Vote, None, vote.election_hash.clone());
             let mut election = Election::new(vote.election_hash.clone());
             election.insert_vote(vote.clone(), true);
-            self.mempool.insert(vote.election_hash.clone(), election.clone());
+            self.elections.insert(vote.election_hash.clone(), election.clone());
             self.send_vote(vote.clone(), election);
             set_timeout(self.clone(), vote.clone());
         }
         else {
-            let mut election = self.mempool.get(&vote.election_hash).unwrap().clone();
+            let mut election = self.elections.get(&vote.election_hash).unwrap().clone();
             let votes = election.votes.get(&vote.round).unwrap();
             if votes.len() > QUORUM && election.timed_out {
-                self.decide_vote(election, vote.value, vote.vote_hash.clone(), vote.round);
+                self.decide_vote(election, vote.value, vote.round);
             }
         }
         println!("Vote: {:?}", vote);
     }
 
     fn handle_transaction(&mut self, tx: &Transaction) {
-        if !self.mempool.contains_key(&tx.hash()) {
-            let vote = Vote::new(vote_hash(0, tx.nonce),0,tx.nonce,VoteType::Vote, None, tx.clone().hash());
+        if !self.elections.contains_key(&tx.hash()) {
+            let vote = Vote::new(self.id, vote_hash(Round(0), tx.nonce),Round(0),tx.nonce,VoteType::Vote, None, tx.clone().hash());
             let mut election = Election::new(vote.election_hash.clone());
-            self.mempool.insert(tx.hash(), election.clone());
+            self.elections.insert(tx.hash(), election.clone());
             election.insert_vote(vote.clone(), true);
             self.send_vote(vote.clone(), election);
-            set_timeout(self.clone(), vote.clone());
-            //println!("Setting timeout...");
+            //set_timeout(self.clone(), vote.clone());
         }
     }
 
     fn send_vote(&self, vote: Vote, election: Election) {
         let msg = Message::Vote(Vote {
+            signer: self.id,
             vote_hash: vote.vote_hash,
             round: vote.round,
             value: vote.value,
             vote_type: vote.vote_type,
             proof: vote.proof,
-            election_hash: election.hash,
+            election_hash: election.hash.clone(),
         });
         self.sender.lock().unwrap().send((self.id, msg));
-        //println!("Node {} voted value {} in round {} of election {}", self.id, vote.value, vote.round, election.hash);
-        //println!("State of election {}: {:#?}", election.hash, election);
+        println!("Node {:?} voted value {:?} in round {:?} of election {:?}", self.id, vote.value, vote.round, election.hash.clone());
+        println!("State of election {:?}: {:#?}", election.hash, election);
     }
 }
 
 fn set_timeout(node: Node, vote: Vote) {
-    //let timer = timer::Timer::new();
     let msg = Message::TimerExpired(vote.clone());
     let sender = node.sender.clone();
     thread::spawn(move || {
