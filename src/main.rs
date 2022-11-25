@@ -13,12 +13,14 @@ use std::ops::Deref;
 use std::ptr::hash;
 use std::sync::{mpsc::{channel, Receiver, Sender}, Arc, Mutex};
 use std::thread;
+use std::thread::sleep;
+use std::time::Duration;
 
 const NUMBER_OF_BYZANTINE_NODES: usize = 1;
 const NUMBER_OF_TOTAL_NODES: usize = 3 * NUMBER_OF_BYZANTINE_NODES + 1;
 const QUORUM: usize = 2 * NUMBER_OF_BYZANTINE_NODES + 1;
 const SEMI_QUORUM: usize = NUMBER_OF_BYZANTINE_NODES + 1;
-const NUMBER_OF_TXS: usize = 10;
+const NUMBER_OF_TXS: usize = 1;
 const TIMEOUT: usize = 1;
 
 fn main() {
@@ -28,7 +30,7 @@ fn main() {
 
     for _ in 0..NUMBER_OF_TXS {
         let tx = Transaction::random();
-        println!("sending new transaction into the network {}", &tx.hash());
+        println!("sending new transaction into the network {:#?}", &tx.hash());
 
         let id = thread_rng().gen_range(0, net.nodes.len()) as u64;
         let node = net.nodes.get_mut(&id).unwrap();
@@ -46,7 +48,7 @@ fn main() {
             for i in 1..NUMBER_OF_TOTAL_NODES {
                 let other_decided = net.nodes.get(&(i as u64)).unwrap().lock().unwrap().decided.clone();
                 for hash in hashes.iter() {
-                    assert_eq!(decided.get(&hash).unwrap(), other_decided.get(&hash).unwrap());
+                    assert_eq!(decided.get(&hash.clone()).unwrap(), other_decided.get(&hash.clone()).unwrap());
                 }
             }
         }
@@ -83,16 +85,25 @@ enum Message {
 
 #[derive(Debug, Clone)]
 struct Vote {
-    hash: Hash,
+    vote_hash: VoteHash,
     round: u32,
     value: u64,
     vote_type: VoteType,
-    proof: Option<Vec<Hash>>,
+    proof: Option<Vec<VoteHash>>,
+    election_hash: ElectionHash,
+}
+
+fn vote_hash(round: u32, value: u64) -> VoteHash {
+    let mut buf = vec![];
+    buf.write_u32::<LittleEndian>(round).unwrap();
+    buf.write_u64::<LittleEndian>(value).unwrap();
+    let digest = digest::digest(&digest::SHA256, &buf);
+    VoteHash(Hash(digest.as_ref().to_vec()))
 }
 
 impl Vote {
-    fn new(hash: Hash, round: u32, value: u64, vote_type: VoteType, proof: Option<Vec<Hash>>) -> Self {
-        Self { hash, round, value, vote_type, proof }
+    fn new(vote_hash: VoteHash, round: u32, value: u64, vote_type: VoteType, proof: Option<Vec<VoteHash>>, election_hash: ElectionHash) -> Self {
+        Self { vote_hash, round, value, vote_type, proof, election_hash }
     }
 
     fn serialize(&self) -> Vec<u8> {
@@ -102,9 +113,9 @@ impl Vote {
         buf
     }
 
-    fn hash(&self) -> Hash {
+    fn hash(&self) -> VoteHash {
         let digest = digest::digest(&digest::SHA256, &self.serialize());
-        Hash(digest.as_ref().to_vec())
+        VoteHash(Hash(digest.as_ref().to_vec()))
     }
 }
 
@@ -119,6 +130,12 @@ struct Transaction {
     nonce: u64,
     data: i32,
 }
+
+#[derive(Eq, PartialEq, Clone, Ord, PartialOrd, Hash, Debug)]
+struct ElectionHash(Hash);
+
+#[derive(Eq, PartialEq, Clone, Ord, PartialOrd, Hash, Debug)]
+struct VoteHash(Hash);
 
 impl Transaction {
     fn random() -> Self {
@@ -135,9 +152,9 @@ impl Transaction {
         buf
     }
 
-    fn hash(&self) -> Hash {
+    fn hash(&self) -> ElectionHash {
         let digest = digest::digest(&digest::SHA256, &self.serialize());
-        Hash(digest.as_ref().to_vec())
+        ElectionHash(Hash(digest.as_ref().to_vec()))
     }
 }
 
@@ -202,19 +219,20 @@ impl Network {
 
 #[derive(Debug, Clone)]
 struct Election {
-    hash: Hash,
+    hash: ElectionHash,
     votes: HashMap<u32, Vec<Vote>>,
-    vote_by_hash: HashMap<Hash, Vote>,
+    vote_by_hash: HashMap<VoteHash, Vote>,
     is_decided: bool,
     vote_tally: HashMap<u64, u64>,
     commit_tally: HashMap<u64, u64>,
     current_value: u64,
     timed_out: bool,
     unvalidated_votes: HashMap<Vote, Vec<Vote>>,
+    voted: bool,
 }
 
 impl Election {
-    fn new(hash: Hash) -> Self {
+    fn new(hash: ElectionHash) -> Self {
         Election {
             hash,
             is_decided: false,
@@ -225,6 +243,7 @@ impl Election {
             vote_by_hash: HashMap::new(),
             unvalidated_votes: HashMap::new(),
             timed_out: false,
+            voted: false,
         }
     }
 
@@ -278,10 +297,10 @@ impl Election {
 
 #[derive(Debug, Clone)]
 struct Node {
-    mempool: HashMap<Hash, Election>,
+    mempool: HashMap<ElectionHash, Election>,
     id: u64,
     sender: Arc<Mutex<Sender<(u64, Message)>>>,
-    decided: HashMap<Hash, u64>,
+    decided: HashMap<ElectionHash, u64>,
 }
 
 impl Node {
@@ -303,28 +322,35 @@ impl Node {
     }
 
     fn handle_vote(&mut self, origin: u64, vote: &Vote) {
-        if self.decided.contains_key(&vote.hash) {
+        if self.decided.contains_key(&vote.election_hash) {
             return;
         }
-        if !self.mempool.contains_key(&vote.hash) {
-            let mut election = Election::new(vote.hash.clone());
+        if !self.mempool.contains_key(&vote.election_hash) {
+            let mut election = Election::new(vote.election_hash.clone());
             election.insert_vote(vote.clone(), false);
             let mut own_vote = vote.clone();
             own_vote.round = 0;
             own_vote.vote_type = VoteType::Vote;
-            self.send_query(own_vote.clone());
             election.insert_vote(own_vote.clone(), true);
+            //set_timeout(self.clone(), vote.clone());
+            self.send_vote(own_vote.clone(), election);
         }
         else {
-            let mut election = self.mempool.get(&vote.hash).unwrap().clone();
-            let votes = election.votes.get(&vote.round).unwrap();
-            if votes.len() > QUORUM && election.timed_out {
-                self.decide_vote(election, vote.value, vote.hash.clone(), vote.round);
+            let mut election = self.mempool.get(&vote.election_hash).unwrap().clone();
+            let mut valid = true;
+            if vote.round != 0 {
+                valid = election.validate_vote(vote.clone());
+            }
+            if valid && !election.voted {
+                let votes = election.votes.get(&vote.round).unwrap();
+                if votes.len() > QUORUM && election.timed_out {
+                    self.decide_vote(election, vote.value, vote.vote_hash.clone(), vote.round);
+                }
             }
         }
     }
 
-    fn decide_vote(&mut self, mut election: Election, value: u64, hash: Hash, round: u32) {
+    fn decide_vote(&mut self, mut election: Election, value: u64, hash: VoteHash, round: u32) {
         let mut highest_value = 0;
         let mut bool = false;
         for v in election.vote_tally.values() {
@@ -335,14 +361,14 @@ impl Node {
                 highest_value = *v;
             }
         }
-        let proof: Option<Vec<Hash>> = Some(election.votes.get(&round).unwrap().iter().map(|vote| vote.hash()).collect());
-        let mut next_round_vote = Vote::new(hash.clone(), round + 1, value, VoteType::Commit, proof);
+        let proof: Option<Vec<VoteHash>> = Some(election.votes.get(&round).unwrap().iter().map(|vote| vote.hash()).collect());
+        let mut next_round_vote = Vote::new(vote_hash(round + 1, value), round + 1, value, VoteType::Commit, proof, election.hash.clone());
         if election.vote_tally.get(&value).unwrap() > &(QUORUM as u64) {
 
         }
         else if election.commit_tally.get(&value).unwrap() > &(QUORUM as u64)  {
             election.is_decided = true;
-            self.decided.insert(hash.clone(), value);
+            self.decided.insert(election.hash.clone(), value);
             return;
         }
         else if election.commit_tally.get(&0).unwrap() > &(SEMI_QUORUM as u64)  {
@@ -361,43 +387,68 @@ impl Node {
             next_round_vote.value = highest_value;
             next_round_vote.vote_type = VoteType::Vote;
         }
-        election.insert_vote(next_round_vote, true);
+        election.insert_vote(next_round_vote.clone(), true);
         election.timed_out = false;
-        self.mempool.insert(hash.clone(), election);
+        election.voted = true;
+        self.mempool.insert(election.hash.clone(), election.clone());
+        self.send_vote(next_round_vote.clone(), election.clone());
     }
 
+    // fn first_vote
+
     fn handle_timeout(&mut self, vote: &Vote) {
-        let mut election = self.mempool.get(&vote.hash).unwrap().clone();
-        let votes = election.votes.get(&vote.round).unwrap();
-        if votes.len() > QUORUM && election.timed_out {
-            self.decide_vote(election, vote.value, vote.hash.clone(), vote.round);
+        if !self.mempool.contains_key(&vote.election_hash.clone()) {
+            let vote = Vote::new(vote_hash(0, vote.value),0, vote.value,VoteType::Vote, None, vote.election_hash.clone());
+            let mut election = Election::new(vote.election_hash.clone());
+            election.insert_vote(vote.clone(), true);
+            self.mempool.insert(vote.election_hash.clone(), election.clone());
+            self.send_vote(vote.clone(), election);
+            set_timeout(self.clone(), vote.clone());
         }
+        else {
+            let mut election = self.mempool.get(&vote.election_hash).unwrap().clone();
+            let votes = election.votes.get(&vote.round).unwrap();
+            if votes.len() > QUORUM && election.timed_out {
+                self.decide_vote(election, vote.value, vote.vote_hash.clone(), vote.round);
+            }
+        }
+        println!("Vote: {:?}", vote);
     }
 
     fn handle_transaction(&mut self, tx: &Transaction) {
         if !self.mempool.contains_key(&tx.hash()) {
-            let vote = Vote::new(tx.clone().hash(),0,tx.clone().nonce,VoteType::Vote, None);
-            self.send_query(vote);
+            let vote = Vote::new(vote_hash(0, tx.nonce),0,tx.nonce,VoteType::Vote, None, tx.clone().hash());
+            let mut election = Election::new(vote.election_hash.clone());
+            self.mempool.insert(tx.hash(), election.clone());
+            election.insert_vote(vote.clone(), true);
+            self.send_vote(vote.clone(), election);
+            set_timeout(self.clone(), vote.clone());
+            //println!("Setting timeout...");
         }
     }
 
-    fn send_query(&self, vote: Vote) {
+    fn send_vote(&self, vote: Vote, election: Election) {
         let msg = Message::Vote(Vote {
-            hash: vote.hash,
+            vote_hash: vote.vote_hash,
             round: vote.round,
             value: vote.value,
             vote_type: vote.vote_type,
             proof: vote.proof,
+            election_hash: election.hash,
         });
         self.sender.lock().unwrap().send((self.id, msg));
+        //println!("Node {} voted value {} in round {} of election {}", self.id, vote.value, vote.round, election.hash);
+        //println!("State of election {}: {:#?}", election.hash, election);
     }
 }
 
 fn set_timeout(node: Node, vote: Vote) {
-    let timer = timer::Timer::new();
+    //let timer = timer::Timer::new();
     let msg = Message::TimerExpired(vote.clone());
     let sender = node.sender.clone();
-    timer.schedule_with_delay(chrono::Duration::seconds(TIMEOUT as i64), move || {
+    thread::spawn(move || {
+        sleep(Duration::from_secs(3));
+        println!("Setting timeout...");
         sender.lock().unwrap().send((node.id, msg.clone()));
     });
 }
