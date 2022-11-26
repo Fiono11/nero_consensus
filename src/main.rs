@@ -15,6 +15,7 @@ use std::sync::{mpsc::{channel, Receiver, Sender}, Arc, Mutex};
 use std::{clone, thread};
 use std::thread::sleep;
 use std::time::Duration;
+use Value::{One, Zero};
 
 const NUMBER_OF_BYZANTINE_NODES: usize = 1;
 const NUMBER_OF_TOTAL_NODES: usize = 3 * NUMBER_OF_BYZANTINE_NODES + 1;
@@ -29,6 +30,27 @@ fn main() {
     let mut hashes = BTreeSet::new();
 
     for _ in 0..NUMBER_OF_TXS {
+        let mut buf = vec![];
+        let mut rng = thread_rng();
+        let random = rng.gen_range(0, i64::MAX);
+        buf.write_i64::<LittleEndian>(random);
+        let digest = digest::digest(&digest::SHA256, &buf);
+        let election_hash = ElectionHash(Hash(digest.as_ref().to_vec()));
+        hashes.insert(election_hash.clone());
+
+        for _ in 0..NUMBER_OF_TOTAL_NODES {
+            let id = thread_rng().gen_range(0, net.nodes.len()) as u64;
+            let vote = Vote::random(NodeId(id), election_hash.clone());
+            let election = Election::new(election_hash.clone(), vote.value.clone());
+
+            let node = net.nodes.get_mut(&id).unwrap();
+            node.lock()
+                .unwrap()
+                .send_vote(vote, election)
+        }
+    }
+
+    /*for _ in 0..NUMBER_OF_TXS {
         let tx = Transaction::random();
         println!("sending new transaction into the network {:#?}", &tx.hash());
 
@@ -40,7 +62,7 @@ fn main() {
         hashes.insert(tx.hash());
 
         //thread::sleep_ms(500);
-    }
+    }*/
 
     loop {
         let mut finished = true;
@@ -86,18 +108,21 @@ impl ::std::fmt::Debug for Hash {
 #[derive(Debug, Clone, Ord, PartialOrd, Eq, PartialEq)]
 enum Message {
     Vote(Vote),
-    Transaction(Transaction),
+    //Transaction(Transaction),
     TimerExpired(Vote),
 }
 
-#[derive(Debug, Clone, Ord, PartialOrd, Eq, PartialEq, Copy)]
+#[derive(Debug, Clone, Ord, PartialOrd, Eq, PartialEq, Copy, Hash)]
 struct NodeId(u64);
 
 #[derive(Debug, Clone, Ord, PartialOrd, Eq, PartialEq, Copy, Hash)]
 struct Round(u32);
 
 #[derive(Debug, Clone, Ord, PartialOrd, Eq, PartialEq, Copy, Hash)]
-struct Value(u64);
+enum Value {
+    Zero,
+    One,
+}
 
 #[derive(Debug, Clone, Ord, PartialOrd, Eq, PartialEq)]
 struct Vote {
@@ -110,10 +135,36 @@ struct Vote {
     election_hash: ElectionHash,
 }
 
+impl Vote {
+    fn random(signer: NodeId, election_hash: ElectionHash) -> Self {
+        let round = Round(0);
+        let mut rng = thread_rng();
+        let mut value = Zero;
+        if rng.gen_range(0, 2) == 1 {
+            value = One;
+        }
+
+        Self {
+            signer,
+            vote_hash: vote_hash(round, value),
+            round,
+            value,
+            vote_type: VoteType::Vote,
+            proof: None,
+            election_hash,
+        }
+    }
+}
+
 fn vote_hash(round: Round, value: Value) -> VoteHash {
     let mut buf = vec![];
     buf.write_u32::<LittleEndian>(round.0).unwrap();
-    buf.write_u64::<LittleEndian>(value.0).unwrap();
+    if value == Zero {
+        buf.write_u64::<LittleEndian>(0).unwrap();
+    }
+    else {
+        buf.write_u64::<LittleEndian>(1).unwrap();
+    }
     let digest = digest::digest(&digest::SHA256, &buf);
     VoteHash(Hash(digest.as_ref().to_vec()))
 }
@@ -126,7 +177,12 @@ impl Vote {
     fn serialize(&self) -> Vec<u8> {
         let mut buf = vec![];
         buf.write_u32::<LittleEndian>(self.round.0).unwrap();
-        buf.write_u64::<LittleEndian>(self.value.0).unwrap();
+        if self.value == Zero {
+            buf.write_u64::<LittleEndian>(0).unwrap();
+        }
+        else {
+            buf.write_u64::<LittleEndian>(1).unwrap();
+        }
         buf
     }
 
@@ -142,11 +198,11 @@ enum VoteType {
     Commit,
 }
 
-#[derive(Debug, Clone, Ord, PartialOrd, Eq, PartialEq)]
+/*#[derive(Debug, Clone, Ord, PartialOrd, Eq, PartialEq)]
 struct Transaction {
     nonce: Value,
     data: i32,
-}
+}*/
 
 #[derive(Eq, PartialEq, Clone, Ord, PartialOrd, Hash, Debug)]
 struct ElectionHash(Hash);
@@ -154,11 +210,11 @@ struct ElectionHash(Hash);
 #[derive(Eq, PartialEq, Clone, Ord, PartialOrd, Hash, Debug)]
 struct VoteHash(Hash);
 
-impl Transaction {
+/*impl Transaction {
     fn random() -> Self {
         let mut rng = thread_rng();
         Transaction {
-            nonce: Value(rand::random::<u64>()),
+            nonce: Value(rng.gen_range(0, 2)),
             data: rng.gen_range(0, 10),
         }
     }
@@ -173,7 +229,7 @@ impl Transaction {
         let digest = digest::digest(&digest::SHA256, &self.serialize());
         ElectionHash(Hash(digest.as_ref().to_vec()))
     }
-}
+}*/
 
 #[derive(Debug)]
 struct Network {
@@ -249,14 +305,14 @@ struct Election {
 }
 
 impl Election {
-    fn new(hash: ElectionHash) -> Self {
+    fn new(hash: ElectionHash, value: Value) -> Self {
         Election {
             hash,
             is_decided: false,
             vote_tally: HashMap::new(),
             commit_tally: HashMap::new(),
             votes: HashMap::new(),
-            current_value: Value(0),
+            current_value: value,
             vote_by_hash: HashMap::new(),
             unvalidated_votes: BTreeSet::new(),
             timed_out: BTreeSet::new(),
@@ -342,7 +398,7 @@ impl Node {
     fn handle_message(&mut self, msg: &Message) {
         match msg {
             Message::Vote(vote) => self.handle_vote(vote),
-            Message::Transaction(tx) => self.handle_transaction(tx),
+            //Message::Transaction(tx) => self.handle_transaction(tx),
             Message::TimerExpired(vote) => self.handle_timeout(vote),
         }
     }
@@ -352,7 +408,7 @@ impl Node {
         if self.decided.contains_key(&vote.election_hash) || vote.signer == self.id {
             return;
         }
-        let mut election = Election::new(vote.election_hash.clone());
+        let mut election = Election::new(vote.election_hash.clone(), vote.value.clone());
         match self.elections.get(&vote.election_hash) {
             Some(e) => election = e.clone(),
             None => ()//set_timeout(self.clone(), vote.clone()),
@@ -385,16 +441,16 @@ impl Node {
     }
 
     fn decide_vote(&mut self, mut election: Election, value: Value, round: Round) {
-        let mut highest_value = Value(0);
+        let mut highest_value = Zero;
         let mut bool = false;
-        for v in election.vote_tally.values() {
+        /*for v in election.vote_tally.values() {
             if v > &(SEMI_QUORUM as u64) {
                 bool = true;
             }
             if v > &(highest_value.0 as u64) {
                 highest_value = Value(*v);
             }
-        }
+        }*/
         let proof: Option<BTreeSet<VoteHash>> = Some(election.votes.get(&round).unwrap().iter().map(|vote| vote.hash()).collect());
         let mut next_round_vote = Vote::new(self.id, vote_hash(Round(round.0 + 1), value), Round(round.0 + 1), value, VoteType::Commit, proof, election.hash.clone());
         //if election.vote_tally.get(&value).unwrap() > &(QUORUM as u64) {
@@ -402,23 +458,21 @@ impl Node {
         //}
         if let Some(a) = election.commit_tally.get(&value) {
             if a > &(QUORUM as u64) {
-                println!("1111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111");
                 election.is_decided = true;
                 self.decided.insert(election.hash.clone(), value);
             }
         }
-        /*else if election.commit_tally.get(&Value(0)).unwrap() > &(SEMI_QUORUM as u64)  {
+        // if at least one correct node voted nil, vote nil
+        /*else if election.vote_tally.get(&Value(0)).unwrap() + election.commit_tally.get(&Value(0)).unwrap() > &(SEMI_QUORUM as u64)  {
             next_round_vote.value = Value(0);
             next_round_vote.vote_type = VoteType::Vote;
-        }*/
-        /*else if bool {
-            next_round_vote.value = election.current_value;
-            next_round_vote.vote_type = VoteType::Vote;
         }
+        // if no value has a chance of reaching quorum in the round, vote nil
         else if !bool {
             next_round_vote.value = Value(0);
             next_round_vote.vote_type = VoteType::Vote;
         }
+        // if none of the above, vote for the value with more votes. in case of tie, for the highest value
         else {
             next_round_vote.value = highest_value;
             next_round_vote.vote_type = VoteType::Vote;
@@ -434,7 +488,7 @@ impl Node {
     fn handle_timeout(&mut self, vote: &Vote) {
         if !self.elections.contains_key(&vote.election_hash.clone()) {
             let vote = Vote::new(self.id.clone(), vote_hash(Round(0), vote.value),Round(0), vote.value,VoteType::Vote, None, vote.election_hash.clone());
-            let mut election = Election::new(vote.election_hash.clone());
+            let mut election = Election::new(vote.election_hash.clone(), vote.value.clone());
             election.insert_vote(vote.clone(), true);
             self.elections.insert(vote.election_hash.clone(), election.clone());
             self.send_vote(vote.clone(), election);
@@ -450,7 +504,7 @@ impl Node {
         println!("Vote: {:?}", vote);
     }
 
-    fn handle_transaction(&mut self, tx: &Transaction) {
+    /*fn handle_transaction(&mut self, tx: &Transaction) {
         if !self.elections.contains_key(&tx.hash()) {
             let vote = Vote::new(self.id, vote_hash(Round(0), tx.nonce),Round(0),tx.nonce,VoteType::Vote, None, tx.clone().hash());
             let mut election = Election::new(vote.election_hash.clone());
@@ -460,7 +514,7 @@ impl Node {
             self.elections.insert(election.clone().hash, election.clone());
             //set_timeout(self.clone(), vote.clone());
         }
-    }
+    }*/
 
     fn send_vote(&self, vote: Vote, election: Election) {
         let msg = Message::Vote(Vote {
