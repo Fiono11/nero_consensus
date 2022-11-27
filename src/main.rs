@@ -13,6 +13,7 @@ use std::ops::Deref;
 use std::ptr::hash;
 use std::sync::{mpsc::{channel, Receiver, Sender}, Arc, Mutex};
 use std::{clone, thread};
+use std::process::id;
 use std::thread::sleep;
 use std::time::Duration;
 use Value::{One, Zero};
@@ -39,15 +40,23 @@ fn main() {
         let election_hash = ElectionHash(Hash(digest.as_ref().to_vec()));
         hashes.insert(election_hash.clone());
 
-        for _ in 0..NUMBER_OF_TOTAL_NODES {
-            let id = thread_rng().gen_range(0, net.nodes.len()) as u64;
-            let vote = Vote::random(NodeId(id), election_hash.clone());
-            let election = Election::new(election_hash.clone());
-
-            let node = net.nodes.get_mut(&id).unwrap();
-            node.lock()
-                .unwrap()
-                .send_vote(vote, election)
+        for id in 0..NUMBER_OF_TOTAL_NODES {
+            let vote = Vote::random(NodeId(id as u64), election_hash.clone());
+            let mut election = Election::new(election_hash.clone());
+            let mut votes = BTreeSet::new();
+            votes.insert(vote.clone());
+            let mut round_state = RoundState::new();
+            round_state.votes = votes;
+            if vote.value == Zero {
+                round_state.zero_votes = 1;
+            }
+            else {
+                round_state.one_votes = 1;
+            }
+            election.state.insert(Round(0), round_state);
+            let mut node = net.nodes.get_mut(&(id as u64)).unwrap().lock().unwrap();
+            node.elections.insert(election_hash.clone(), election.clone());
+            node.send_vote(vote);
         }
     }
 
@@ -144,7 +153,6 @@ impl Vote {
         if rng.gen_range(0, 2) == 1 {
             value = One;
         }
-
         Self {
             signer,
             vote_hash: vote_hash(round, value, signer),
@@ -294,13 +302,13 @@ impl Network {
 
 #[derive(Debug, Clone)]
 struct RoundState {
-    votes: BTreeSet<Vote>,
     zero_votes: u64,
     zero_commits: u64,
     one_votes: u64,
     one_commits: u64,
     voted: bool,
     timed_out: bool,
+    votes: BTreeSet<Vote>,
 }
 
 impl RoundState {
@@ -356,24 +364,28 @@ impl Election {
             round_state.voted = true;
         }
         self.state.insert(vote.round, round_state);
-        self.tally_votes(&vote.round);
+        self.tally_vote(vote.clone());
         self.vote_by_hash.insert(vote.clone().vote_hash, vote.clone());
     }
 
-    fn tally_votes(&mut self, round: &Round) {
-        if let Some(round_state) = self.state.get(round) {
-            let mut round_state = round_state.clone();
-            let votes = round_state.votes.clone();
-            for vote in votes.iter() {
-                if vote.vote_type == VoteType::Vote {
-                    round_state.zero_votes += 1;
-                }
-                else {
-                    round_state.zero_commits += 1;
-                }
+    fn tally_vote(&mut self, vote: Vote) {
+        let round = vote.round;
+        //if let Some(round_state) = self.state.get(&round) {
+            let mut round_state = self.state.get(&round).unwrap().clone();
+            if vote.vote_type == VoteType::Vote && vote.value == Zero {
+                round_state.zero_votes += 1;
             }
-            self.state.insert(*round, round_state);
-        }
+            else if vote.vote_type == VoteType::Commit && vote.value == Zero {
+                round_state.zero_commits += 1;
+            }
+            else if vote.vote_type == VoteType::Vote && vote.value == One {
+                round_state.one_votes += 1;
+            }
+            else if vote.vote_type == VoteType::Commit && vote.value == One {
+                round_state.one_commits += 1;
+            }
+            self.state.insert(round, round_state);
+        //}
     }
 
     fn validate_vote(&mut self, vote: Vote) {
@@ -426,39 +438,51 @@ impl Node {
         if self.decided.contains_key(&vote.election_hash) || vote.signer == self.id {
             return;
         }
-        let mut election = Election::new(vote.election_hash.clone());
-        match self.elections.get(&vote.election_hash) {
-            Some(e) => election = e.clone(),
-            None => ()//set_timeout(self.clone(), vote.clone()),
-        }
-        election.validate_vote(vote.clone());
+        let mut election = self.elections.get(&vote.election_hash).unwrap().clone();
+        /*election.validate_vote(vote.clone());
         let unvalidated_votes = election.clone().unvalidated_votes;
         for v in unvalidated_votes.iter() {
             if v.proof.as_ref().unwrap().contains(&vote.vote_hash) {
                 election.validate_vote(v.clone());
             }
-        }
-        if let None = election.state.get(&vote.round) {
-            let mut own_vote = vote.clone();
-            own_vote.round = Round(0);
-            own_vote.vote_type = VoteType::Vote;
-            election.insert_vote(own_vote.clone(), true);
-            self.send_vote(own_vote.clone(), election.clone());
+        }*/
+        let mut round_state = RoundState::new();
+        match election.state.get(&vote.round) {
+            Some(rs) => {
+                round_state = rs.clone();
+                round_state.votes.insert(vote.clone());
+                election.tally_vote(vote.clone());
+                if !round_state.voted {
+                    let mut own_vote = vote.clone();
+                    own_vote.round = vote.round;
+                    own_vote.vote_type = VoteType::Vote;
+                    election.insert_vote(own_vote.clone(), true);
+                    self.send_vote(own_vote.clone());
+                    round_state.votes.insert(own_vote.clone());
+                    election.tally_vote(own_vote.clone());
+                }
+                election.state.insert(vote.round, round_state.clone());
+            }
+            None => {
+                round_state.votes.insert(vote.clone());
+                election.tally_vote(vote.clone());
+                let mut own_vote = vote.clone();
+                own_vote.round = vote.round;
+                own_vote.vote_type = VoteType::Vote;
+                election.insert_vote(own_vote.clone(), true);
+                self.send_vote(own_vote.clone());
+                election.state.insert(vote.round, round_state.clone());
+            }
         }
         self.elections.insert(election.clone().hash, election.clone());
-        let binding = election.clone();
-        match binding.state.get(&vote.round) {
-            Some(rs) => {
-                if rs.votes.len() > QUORUM && !election.is_decided {//&& election.clone().timed_out {
-                    self.decide_vote(election.clone(), vote.round);
-                }
-            }
-            None => (),
+        if round_state.votes.len() >= QUORUM && !election.is_decided {//&& election.clone().timed_out {
+            self.decide_next_vote(election.hash.clone(), vote.round);
         }
-        println!("State of election {:?}: {:#?}", election.hash, election);
+        println!("State of election of node {:?}: {:?}", self.id, election);
     }
 
-    fn decide_vote(&mut self, mut election: Election, round: Round) {
+    fn decide_next_vote(&mut self, election_hash: ElectionHash, round: Round) {
+        let mut election = self.elections.get(&election_hash).unwrap().clone();
         let next_round = Round(round.0 + 1);
         let mut round_state = election.state.get(&round).unwrap().clone();
         let proof: Option<BTreeSet<VoteHash>> = Some(round_state.votes.iter().map(|vote| vote.hash()).collect());
@@ -487,7 +511,7 @@ impl Node {
         round_state.voted = true;
         election.state.insert(next_round, round_state);
         self.elections.insert(election.hash.clone(), election.clone());
-        self.send_vote(next_round_vote.clone(), election.clone());
+        self.send_vote(next_round_vote.clone());
     }
 
     // fn first_vote
@@ -523,7 +547,7 @@ impl Node {
         }
     }*/
 
-    fn send_vote(&self, vote: Vote, election: Election) {
+    fn send_vote(&self, vote: Vote) {
         let msg = Message::Vote(Vote {
             signer: self.id,
             vote_hash: vote.vote_hash,
@@ -531,11 +555,11 @@ impl Node {
             value: vote.value,
             vote_type: vote.vote_type,
             proof: vote.proof,
-            election_hash: election.hash.clone(),
+            election_hash: vote.election_hash.clone(),
         });
         self.sender.lock().unwrap().send((self.id, msg));
-        println!("Node {:?} voted value {:?} in round {:?} of election {:?}", self.id, vote.value, vote.round, election.hash.clone());
-        println!("State of election {:?}: {:?}", election.hash, election);
+        println!("Node {:?} voted value {:?} in round {:?} of election {:?}", self.id, vote.value, vote.round, vote.election_hash.clone());
+        println!("State of election of node {:?}: {:?}", self.id, vote.election_hash.clone());
     }
 }
 
