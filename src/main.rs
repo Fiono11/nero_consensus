@@ -48,7 +48,7 @@ fn main() {
         let election_hash = ElectionHash(Hash(digest.as_ref().to_vec()));
         hashes.insert(election_hash.clone());
         let id = thread_rng().gen_range(0, net.nodes.len()) as u64;
-        let vote = Vote::random(NodeId(id as u64), election_hash.clone());
+        let vote = Vote::random(NodeId(id as u64), election_hash.clone(), Round(0));
         let mut election = Election::new(election_hash.clone());
         let mut node = net.nodes.get_mut(&(id as u64)).unwrap().lock().unwrap();
         let rs = election.insert_vote(vote.clone(), true, node.id, node.sender.clone());
@@ -59,14 +59,14 @@ fn main() {
 
     loop {
         let mut finished = true;
-        for i in 0..NUMBER_OF_TOTAL_NODES {
+        for i in NUMBER_OF_BYZANTINE_NODES..NUMBER_OF_TOTAL_NODES {
             if net.nodes.get(&(i as u64)).unwrap().lock().unwrap().decided.clone().len() != hashes.len() {
                 finished = false;
             }
         }
-        let decided = net.nodes.get(&0).unwrap().lock().unwrap().decided.clone();
+        let decided = net.nodes.get(&(NUMBER_OF_BYZANTINE_NODES as u64)).unwrap().lock().unwrap().decided.clone();
         if finished {
-            for i in 1..NUMBER_OF_TOTAL_NODES {
+            for i in NUMBER_OF_BYZANTINE_NODES + 1..NUMBER_OF_TOTAL_NODES {
                 let other_decided = net.nodes.get(&(i as u64)).unwrap().lock().unwrap().decided.clone();
                 for hash in hashes.iter() {
                     assert_eq!(decided.get(&hash.clone()).unwrap(), other_decided.get(&hash.clone()).unwrap());
@@ -129,14 +129,17 @@ struct Vote {
 }
 
 impl Vote {
-    fn random(signer: NodeId, election_hash: ElectionHash) -> Self {
-        let round = Round(0);
+    fn random(signer: NodeId, election_hash: ElectionHash, round: Round) -> Self {
         let mut rng = thread_rng();
         let mut value = Zero;
+        let mut vote_type = VoteType::Vote;
         if rng.gen_range(0, 2) == 1 {
             value = One;
         }
-        Self {
+        if rng.gen_range(0, 2) == 1 {
+            vote_type = Commit;
+        }
+        let mut vote = Self {
             signer,
             vote_hash: vote_hash(round, value, signer),
             round,
@@ -144,7 +147,13 @@ impl Vote {
             vote_type: VoteType::Vote,
             proof: None,
             election_hash,
-        }
+        };
+        vote.proof = vote.prove();
+        vote
+    }
+
+    fn prove(&self) -> Option<BTreeSet<VoteHash>> {
+        None
     }
 }
 
@@ -206,10 +215,20 @@ struct Network {
 impl Network {
     fn new() -> Self {
         let (sender, receiver) = channel();
+        let mut nodes = HashMap::new();
+
+        for i in NUMBER_OF_BYZANTINE_NODES..NUMBER_OF_TOTAL_NODES {
+            let node = Arc::new(Mutex::new(Node::new(NodeId(i as u64), Arc::new(Mutex::new(sender.clone())), false)));
+            nodes.insert(i as u64, node);
+        }
+
+        for i in 0..NUMBER_OF_BYZANTINE_NODES {
+            let node = Arc::new(Mutex::new((Node::new(NodeId(i as u64), Arc::new(Mutex::new(sender.clone())), true))));
+            nodes.insert(i as u64, node);
+        }
+
         Network {
-            nodes: (0..NUMBER_OF_TOTAL_NODES as u64)
-                .map(|id| (id, Arc::new(Mutex::new(Node::new(NodeId(id), Arc::new(Mutex::new(sender.clone())))))))
-                .collect(),
+            nodes,
             receiver: Arc::new(Mutex::new(receiver)),
         }
     }
@@ -340,14 +359,20 @@ impl Election {
         round_state
     }
 
-    fn validate_vote(&mut self, vote: Vote, id: NodeId, sender: Arc<Mutex<Sender<(NodeId, Message)>>>) {
+    fn validate_vote(&mut self, vote: Vote, id: NodeId, sender: Arc<Mutex<Sender<(NodeId, Message)>>>) -> bool {
         let mut valid = true;
         if vote.round != Round(0) {
-            for hash in vote.clone().proof.unwrap().iter() {
-                if !self.vote_by_hash.contains_key(&hash) {
-                    valid = false;
+            match vote.clone().proof {
+                Some(p) => {
+                    for hash in vote.clone().proof.unwrap().iter() {
+                        if !self.vote_by_hash.contains_key(&hash) {
+                            valid = false;
+                        }
+                    }
                 }
+                None => return false,
             }
+
         }
         if valid {
             self.insert_vote(vote.clone(), false, id, sender);
@@ -356,6 +381,7 @@ impl Election {
         else {
             self.unvalidated_votes.insert(vote.clone());
         }
+        valid
     }
 }
 
@@ -366,16 +392,18 @@ struct Node {
     sender: Arc<Mutex<Sender<(NodeId, Message)>>>,
     decided: HashMap<ElectionHash, Value>,
     messages: u64,
+    byzantine: bool,
 }
 
 impl Node {
-    fn new(id: NodeId, sender: Arc<Mutex<Sender<(NodeId, Message)>>>) -> Self {
+    fn new(id: NodeId, sender: Arc<Mutex<Sender<(NodeId, Message)>>>, byzantine: bool) -> Self {
         Node {
             id,
             sender,
             elections: HashMap::new(),
             decided: HashMap::new(),
             messages: 0,
+            byzantine,
         }
     }
 
@@ -449,7 +477,16 @@ impl Node {
         let mut round_state = election.state.get(&round).unwrap().clone();
         let proof: Option<BTreeSet<VoteHash>> = Some(round_state.votes.iter().map(|vote| vote.hash()).collect());
         let mut next_round_vote = Vote::new(self.id, vote_hash(next_round, Zero, self.id), next_round, Zero, VoteType::Vote, proof, election.hash.clone());
-        if round_state.zero_commits >= SEMI_QUORUM as u64 && round_state.one_commits >= SEMI_QUORUM as u64 {
+        if self.byzantine {
+            let mut rng = thread_rng();
+            if rng.gen_range(0, 2) == 0 {
+                next_round_vote = Vote::random(self.id, election.hash.clone(), round);
+            }
+            else {
+                return;
+            }
+        }
+        else if round_state.zero_commits >= SEMI_QUORUM as u64 && round_state.one_commits >= SEMI_QUORUM as u64 {
             info!("This should not happen!!!");
         }
         else if round_state.zero_commits >= QUORUM as u64 {
