@@ -11,7 +11,7 @@ use ring::digest;
 use std::collections::{BTreeSet, HashMap};
 use std::ops::Deref;
 use std::ptr::hash;
-use std::sync::{mpsc::{channel, Receiver, Sender}, Arc, Mutex};
+use std::sync::{mpsc::{channel, Receiver, Sender}, Arc, Mutex, MutexGuard};
 use std::{clone, thread};
 use std::process::id;
 use std::thread::sleep;
@@ -411,7 +411,7 @@ impl Node {
         election.state.insert(vote.round, round_state.clone());
         self.elections.insert(election.hash.clone(), Arc::new(Mutex::new(election.clone())));
         info!("State of election of {:?}: {:?}", self.id, election);
-        info!("number of votes in round {:?}: {:?}", vote.round.0 , self.elections.get(&vote.election_hash).unwrap().lock().unwrap().state.get(&vote.round).unwrap().votes.len());
+        info!("number of votes in round {:?}: {:?}", vote.round.0 , election.state.get(&vote.round).unwrap().votes.len());
         if !round_state.voted {
             let mut own_vote = vote.clone();
             if vote.round.0 == 0 {
@@ -433,37 +433,45 @@ impl Node {
             info!("number of votes: {:?}", self.elections.get(&vote.election_hash).unwrap().lock().unwrap().state.get(&vote.round).unwrap().votes.len());
             self.send_vote(own_vote.clone());
         }
+        let binding = self.elections.get(&vote.election_hash).unwrap().clone();
+        let e = binding.lock().unwrap();
         if round_state.votes.len() >= QUORUM && !election.is_decided && round_state.timed_out {
             match election.state.get(&Round(vote.round.0 + 1)) {
                 Some(rs) => {
                     if !rs.voted {
-                        self.decide_next_round_vote(election.hash.clone(), vote.round);
+                        self.decide_next_round_vote(e, vote.round);
                     }
                 }
-                None => self.decide_next_round_vote(election.hash.clone(), vote.round),
+                None => self.decide_next_round_vote(e, vote.round),
             }
             info!("State of election of node {:?}: {:?}", self.id, election);
         }
     }
 
-    fn decide_next_round_vote(&mut self, election_hash: ElectionHash, round: Round) {
-        let mut election = self.elections.get(&election_hash).unwrap().clone();
+    fn decide_next_round_vote(&mut self, mut election: MutexGuard<Election>, round: Round) {
+        let election_hash = election.hash.clone();
+        info!("5!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!");
+        //let mut election = self.elections.get(&election_hash).unwrap().clone();
+        //let binding = self.elections.get(&election_hash).unwrap().clone();
+        info!("6!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!");
+        //let mut election = binding.lock().unwrap();
+        info!("6!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!");
         let next_round = Round(round.0 + 1);
-        let mut round_state = election.lock().unwrap().state.get(&round).unwrap().clone();
+        let mut round_state = election.state.get(&round).unwrap().clone();
         let proof: Option<BTreeSet<VoteHash>> = Some(round_state.votes.iter().map(|vote| vote.hash()).collect());
-        let mut next_round_vote = Vote::new(self.id, vote_hash(next_round, Zero, self.id), next_round, Zero, VoteType::Vote, proof, election.lock().unwrap().hash.clone());
-
+        let mut next_round_vote = Vote::new(self.id, vote_hash(next_round, Zero, self.id), next_round, Zero, VoteType::Vote, proof, election.hash.clone());
+        info!("6!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!");
         if round_state.zero_commits >= SEMI_QUORUM as u64 && round_state.one_commits >= SEMI_QUORUM as u64 {
             info!("This should not happen!!!");
         }
         else if round_state.zero_commits >= QUORUM as u64 {
-            election.lock().unwrap().is_decided = true;
-            self.decided.insert(election.lock().unwrap().hash.clone(), Zero);
+            election.is_decided = true;
+            self.decided.insert(election.hash.clone(), Zero);
             info!("Node {:?} decided value {:?} in round {:?}", self.id, Zero, round);
         }
         else if round_state.one_commits >= QUORUM as u64 {
-            election.lock().unwrap().is_decided = true;
-            self.decided.insert(election.lock().unwrap().hash.clone(), One);
+            election.is_decided = true;
+            self.decided.insert(election.hash.clone(), One);
             info!("Node {:?} decided value {:?} in round {:?}", self.id, One, round);
         }
         else if round_state.zero_votes + round_state.zero_commits >= QUORUM as u64 || round_state.zero_commits >= SEMI_QUORUM as u64 {
@@ -484,30 +492,38 @@ impl Node {
         else {
             info!("CASE MISSING!!!");
         }
-
-        let next_round_state = election.lock().unwrap().insert_vote(next_round_vote.clone(), true, self.id, self.sender.clone());
-        election.lock().unwrap().state.insert(next_round, next_round_state);
-        self.elections.insert(election.lock().unwrap().hash.clone(), election.clone());
+        info!("6!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!");
+        let next_round_state = election.insert_vote(next_round_vote.clone(), true, self.id, self.sender.clone());
+        election.state.insert(next_round, next_round_state);
+        self.elections.insert(election.hash.clone(), Arc::new(Mutex::new(election.clone())));
         self.send_vote(next_round_vote.clone());
     }
 
     fn handle_timeout(&mut self, vote: &Vote) {
         info!("{:?}: round {:?} of election {:?} timed out!", self.id, vote.round, vote.election_hash);
-        let mut election = self.elections.get(&vote.election_hash).unwrap().clone();
-        let mut round_state = election.lock().unwrap().state.get(&vote.round).unwrap().clone();
+        //let mut election = self.elections.get(&vote.election_hash).unwrap().clone().lock().unwrap();
+        let binding = self.elections.get(&vote.election_hash).unwrap().clone();
+        let mut election = binding.lock().unwrap();
+        let mut round_state = election.state.get(&vote.round).unwrap().clone();
         round_state.timed_out = true;
-        election.lock().unwrap().state.insert(vote.round, round_state.clone());
-        if round_state.votes.len() >= QUORUM && !election.lock().unwrap().is_decided && round_state.timed_out {
-            match election.lock().unwrap().state.get(&Round(vote.round.0 + 1)) {
+        election.state.insert(vote.round, round_state.clone());
+        info!("1!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!");
+        if round_state.votes.len() >= QUORUM && !election.is_decided && round_state.timed_out {
+            match election.state.get(&Round(vote.round.0 + 1)) {
                 Some(rs) => {
+                    info!("2!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!");
                     if !rs.voted { // redundant as the node should not vote in round r + 1 before round r times out
-                        self.decide_next_round_vote(election.lock().unwrap().hash.clone(), vote.round);
+                        self.decide_next_round_vote(election, vote.round);
                     }
                 }
-                None => self.decide_next_round_vote(election.lock().unwrap().hash.clone(), vote.round),
+                None => {
+                    info!("3!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!");
+                    self.decide_next_round_vote(election, vote.round);
+                },
             }
-            info!("State of election of node {:?}: {:?}", self.id, election);
+            //info!("State of election of node {:?}: {:?}", self.id, election);
         }
+        info!("4!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!");
     }
 
     fn send_vote(&mut self, vote: Vote) {
@@ -539,7 +555,7 @@ fn set_timeout(id: NodeId, sender: Arc<Mutex<Sender<(NodeId, Message)>>>, vote: 
     info!("Setting timeout...");
     //let sender = node.sender.clone();
     thread::spawn(move || {
-        sleep(Duration::from_millis(10));
+        //sleep(Duration::from_millis(10));
         sender.lock().unwrap().send((id, msg.clone()));
         info!("Timeout message sent!")
     });
