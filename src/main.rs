@@ -24,7 +24,7 @@ const NUMBER_OF_BYZANTINE_NODES: usize = 1;
 const NUMBER_OF_TOTAL_NODES: usize = 3 * NUMBER_OF_BYZANTINE_NODES + 1;
 const QUORUM: usize = 2 * NUMBER_OF_BYZANTINE_NODES + 1;
 const SEMI_QUORUM: usize = NUMBER_OF_BYZANTINE_NODES + 1;
-const NUMBER_OF_TXS: usize = 1;
+const NUMBER_OF_TXS: usize = 2;
 const TIMEOUT: usize = 1;
 
 fn main() {
@@ -64,12 +64,18 @@ fn main() {
                 finished = false;
             }
         }
-        let decided = net.nodes.get(&(NUMBER_OF_BYZANTINE_NODES as u64)).unwrap().lock().unwrap().decided.clone();
         if finished {
+            let decided = net.nodes.get(&(NUMBER_OF_BYZANTINE_NODES as u64)).unwrap().lock().unwrap().decided.clone();
             for i in NUMBER_OF_BYZANTINE_NODES + 1..NUMBER_OF_TOTAL_NODES {
                 let other_decided = net.nodes.get(&(i as u64)).unwrap().lock().unwrap().decided.clone();
                 for hash in hashes.iter() {
-                    assert_eq!(decided.get(&hash.clone()).unwrap(), other_decided.get(&hash.clone()).unwrap());
+                    if decided.get(&hash.clone()).unwrap() != other_decided.get(&hash.clone()).unwrap() {
+                        info!("!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!");
+                        info!("decided 1: {:?}", net.nodes.get(&(NUMBER_OF_BYZANTINE_NODES as u64)).unwrap().lock().unwrap().decided);
+                        info!("decided {}: {:?}", i, net.nodes.get(&(i as u64)).unwrap().lock().unwrap().decided);
+                        break;
+                    }
+                    //assert_eq!(decided.get(&hash.clone()).unwrap(), other_decided.get(&hash.clone()).unwrap());
                 }
             }
             info!("CONSENSUS ACHIEVED!!!");
@@ -312,6 +318,7 @@ struct Election {
     vote_by_hash: HashMap<VoteHash, Vote>,
     is_decided: bool,
     unvalidated_votes: BTreeSet<Vote>,
+    decided_value: Option<Value>,
 }
 
 impl Election {
@@ -322,6 +329,7 @@ impl Election {
             state: HashMap::new(),
             vote_by_hash: HashMap::new(),
             unvalidated_votes: BTreeSet::new(),
+            decided_value: None,
         }
     }
 
@@ -360,6 +368,7 @@ impl Election {
     }
 
     fn validate_vote(&mut self, vote: Vote, id: NodeId, sender: Arc<Mutex<Sender<(NodeId, Message)>>>) -> bool {
+        // check that not only the hash exists in previous round but validate if the vote is correct
         let mut valid = true;
         if vote.round != Round(0) {
             match vote.clone().proof {
@@ -436,9 +445,10 @@ impl Node {
         self.elections.insert(election.hash.clone(), Arc::new(Mutex::new(election.clone())));
         info!("State of election of {:?}: {:?}", self.id, election);
         info!("number of votes in round {:?}: {:?}", vote.round.0 , election.state.get(&vote.round).unwrap().votes.len());
-        if !round_state.voted {
-            let mut own_vote = vote.clone();
-            if vote.round.0 == 0 {
+        if !round_state.voted && vote.round.0 == 0 {
+            let own_vote = Vote::random(self.id, election.hash.clone(), Round(0));
+            /*let mut own_vote = vote.clone();
+            //if vote.round.0 == 0 {
                 let mut rng = thread_rng();
                 let bit = rng.gen_range(0, 2);
                 if bit == 0 {
@@ -447,9 +457,9 @@ impl Node {
                 else {
                     own_vote.value = One;
                 }
-            }
+            //}
             own_vote.signer = self.id;
-            own_vote.vote_hash = vote_hash(vote.round, vote.value, vote.signer);
+            own_vote.vote_hash = vote_hash(vote.round, vote.value, vote.signer);*/
             let rs = election.insert_vote(own_vote.clone(), true, self.id, self.sender.clone());
             election.state.insert(vote.round, rs);
             self.elections.insert(election.clone().hash, Arc::new(Mutex::new(election.clone())));
@@ -459,7 +469,7 @@ impl Node {
         }
         let binding = self.elections.get(&vote.election_hash).unwrap().clone();
         let e = binding.lock().unwrap();
-        if round_state.votes.len() >= QUORUM && !election.is_decided && round_state.timed_out {
+        if round_state.votes.len() >= QUORUM && round_state.timed_out {
             match election.state.get(&Round(vote.round.0 + 1)) {
                 Some(rs) => {
                     if !rs.voted {
@@ -481,23 +491,33 @@ impl Node {
             let mut rng = thread_rng();
             if rng.gen_range(0, 2) == 0 {
                 next_round_vote = Vote::random(self.id, election.hash.clone(), round);
+                //next_round_vote.proof = proof.clone();
             }
             else {
                 return;
             }
         }
+        else if election.is_decided {
+            next_round_vote.vote_type = Commit;
+            let value = election.decided_value.unwrap();
+            next_round_vote.value = value;
+            next_round_vote.vote_hash = vote_hash(next_round, value, self.id);
+        }
         else if round_state.zero_commits >= SEMI_QUORUM as u64 && round_state.one_commits >= SEMI_QUORUM as u64 {
             info!("This should not happen!!!");
         }
+        //else if  { } if decided, always commit decided value
         else if round_state.zero_commits >= QUORUM as u64 {
+            election.decided_value = Some(Zero);
             election.is_decided = true;
             self.decided.insert(election.hash.clone(), Zero);
-            info!("Node {:?} decided value {:?} in round {:?}", self.id, Zero, round);
+            info!("Node {:?} decided value {:?} in round {:?} of election {:?}", self.id, Zero, round, election.hash);
         }
         else if round_state.one_commits >= QUORUM as u64 {
+            election.decided_value = Some(One);
             election.is_decided = true;
             self.decided.insert(election.hash.clone(), One);
-            info!("Node {:?} decided value {:?} in round {:?}", self.id, One, round);
+            info!("Node {:?} decided value {:?} in round {:?} of election {:?}", self.id, One, round, election.hash);
         }
         else if round_state.zero_votes + round_state.zero_commits >= QUORUM as u64 || round_state.zero_commits >= SEMI_QUORUM as u64 {
             next_round_vote.vote_type = Commit; // add vote_type to hash
@@ -530,7 +550,7 @@ impl Node {
         let mut round_state = election.state.get(&vote.round).unwrap().clone();
         round_state.timed_out = true;
         election.state.insert(vote.round, round_state.clone());
-        if round_state.votes.len() >= QUORUM && !election.is_decided && round_state.timed_out {
+        if round_state.votes.len() >= QUORUM && round_state.timed_out {
             match election.state.get(&Round(vote.round.0 + 1)) {
                 Some(rs) => {
                     if !rs.voted { // redundant as the node should not vote in round r + 1 before round r times out
