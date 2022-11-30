@@ -1,3 +1,8 @@
+mod node;
+mod vote;
+mod election;
+mod core;
+
 #[macro_use]
 extern crate log;
 extern crate byteorder;
