@@ -461,6 +461,9 @@ impl Node {
         info!("Node {:?} received from node {:?} {:?}", self.id, vote.signer, vote);
         let mut election = Election::new(vote.election_hash.clone());
         let mut own_vote = false;
+        if !self.byzantine && vote.round.0 != 0 {
+            assert!(vote.proof.as_ref().unwrap().len() >= QUORUM);
+        }
         if self.id == vote.signer {
             own_vote = true;
         }
