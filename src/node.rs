@@ -99,7 +99,7 @@ impl Node {
                 round_state = rs.clone();
             }
         }
-        let mut valid = self.validate_vote(vote.clone());
+        /*let mut valid = self.validate_vote(vote.clone());
         if valid {
             if vote.signer == self.id {
                 round_state.voted = true;
@@ -108,7 +108,8 @@ impl Node {
         }
         else {
             round_state.unvalidated_votes.insert(vote.clone());
-        }
+        }*/
+        round_state.votes.insert(vote.clone()).then(|| round_state.tally_vote(vote.clone()));
         election.state.insert(vote.round, round_state);
         self.elections.insert(election.hash.clone(), election.clone());
     }
@@ -135,13 +136,13 @@ impl Node {
                 return true;
             }
         }
-        if valid {
+        /*if valid {
             let vote1 = self.decide_vote(vote.election_hash.clone(), Round(vote.round.0 - 1));
             if vote1 != vote {
                 println!("vote1: {:?}", vote1);
                 valid = false;
             }
-        }
+        }*/
         valid
     }
 
@@ -161,11 +162,16 @@ impl Node {
             election.is_decided = true;
             self.decided.insert(election.hash.clone(), Zero);
             info!("Node {:?} decided value {:?}", self.id, Zero);
+            next_round_vote.vote_type = Commit;
+            next_round_vote.vote_hash = Vote::vote_hash(next_round, Zero, self.id, VoteType::Commit);
         }
         else if round_state.one_commits >= QUORUM as u64 {
             election.is_decided = true;
             self.decided.insert(election.hash.clone(), One);
             info!("Node {:?} decided value {:?}", self.id, One);
+            next_round_vote.value = One;
+            next_round_vote.vote_type = Commit;
+            next_round_vote.vote_hash = Vote::vote_hash(next_round, One, self.id, VoteType::Commit);
         }
         else if round_state.zero_votes + round_state.zero_commits >= QUORUM as u64 || round_state.zero_commits >= SEMI_QUORUM as u64 {
             next_round_vote.vote_type = Commit;
@@ -426,5 +432,120 @@ mod tests {
         let vote_hash7 = Vote::vote_hash(Round(1), Value::Zero, node1.id, VoteType::Commit);
         let vote = Vote::new(node1.id, vote_hash7, Round(1), Value::Zero, VoteType::Commit, Some(proof), election_hash);
         assert_eq!(node1.validate_vote(vote), true);
+    }
+
+    #[test]
+    /// Only a vote type Vote is valid in round 0, a Commit is not
+    fn validate_vote5() {
+        let mut network = Network::new();
+        let mut node1= network.nodes.get(&0).unwrap().lock().unwrap();
+        let mut node2= network.nodes.get(&1).unwrap().lock().unwrap();
+        let election_hash = ElectionHash::random();
+        let round = Round(0);
+        let value1 = Value::One;
+        let vote_hash1 = Vote::vote_hash(round, value1, node1.id.clone(), VoteType::Vote);
+        let vote1 = Vote::new(node1.id.clone(), vote_hash1.clone(), round, value1, VoteType::Commit, None, election_hash.clone());
+        assert_eq!(node2.validate_vote(vote1), false);
+    }
+
+    #[test]
+    fn validate_vote6() {
+        let mut network = Network::new();
+        let mut node1= network.nodes.get(&0).unwrap().lock().unwrap();
+        let mut node2= network.nodes.get(&1).unwrap().lock().unwrap();
+        let mut node3= network.nodes.get(&2).unwrap().lock().unwrap();
+        let election_hash = ElectionHash::random();
+        let round = Round(0);
+        let value1 = Value::One;
+        let value2 = Value::One;
+        let value3 = Value::Zero;
+        let vote_hash1 = Vote::vote_hash(round, value1, node1.id.clone(), VoteType::Vote);
+        let vote_hash2 = Vote::vote_hash(round, value2, node2.id.clone(), VoteType::Vote);
+        let vote_hash3 = Vote::vote_hash(round, value3, node3.id.clone(), VoteType::Vote);
+        let vote1 = Vote::new(node1.id.clone(), vote_hash1.clone(), round, value1, VoteType::Vote, None, election_hash.clone());
+        node1.insert_vote(vote1.clone());
+        let vote2 = Vote::new(node2.id.clone(), vote_hash2.clone(), round, value2, VoteType::Vote, None, election_hash.clone());
+        node1.insert_vote(vote2.clone());
+        let vote3 = Vote::new(node3.id.clone(), vote_hash3.clone(), round, value3, VoteType::Vote, None, election_hash.clone());
+        //node1.insert_vote(vote3.clone());
+        let mut proof = BTreeSet::new();
+        proof.insert(vote1.vote_hash);
+        proof.insert(vote2.vote_hash);
+        proof.insert(vote3.vote_hash.clone());
+        let vote_hash4 = Vote::vote_hash(Round(1), value1, node1.id, VoteType::Vote);
+        let vote = Vote::new(node1.id, vote_hash4, Round(1), value1, VoteType::Vote, Some(proof), election_hash);
+        println!("vote: {:?}", vote);
+        assert_eq!(node1.validate_vote(vote.clone()), false);
+        node1.insert_vote(vote3.clone());
+        assert_eq!(node1.validate_vote(vote), true);
+    }
+
+    #[test]
+    fn validate_vote7() {
+        let mut network = Network::new();
+        let mut node1= network.nodes.get(&0).unwrap().lock().unwrap();
+        let mut node2= network.nodes.get(&1).unwrap().lock().unwrap();
+        let mut node3= network.nodes.get(&2).unwrap().lock().unwrap();
+        let mut node4= network.nodes.get(&3).unwrap().lock().unwrap();
+        let mut node5= network.nodes.get(&4).unwrap().lock().unwrap();
+        let election_hash = ElectionHash::random();
+        let round = Round(0);
+        let value1 = Value::Zero;
+        let value2 = Value::Zero;
+        let value3 = Value::Zero;
+        let value4 = Value::Zero;
+        let value5 = Value::Zero;
+        let vote_hash1 = Vote::vote_hash(round, value1, node1.id.clone(), VoteType::Vote);
+        let vote_hash2 = Vote::vote_hash(round, value2, node2.id.clone(), VoteType::Vote);
+        let vote_hash3 = Vote::vote_hash(round, value3, node3.id.clone(), VoteType::Vote);
+        let vote_hash4 = Vote::vote_hash(round, value3, node4.id.clone(), VoteType::Vote);
+        let vote_hash5 = Vote::vote_hash(round, value3, node5.id.clone(), VoteType::Vote);
+        let vote1 = Vote::new(node1.id.clone(), vote_hash1.clone(), round, value1, VoteType::Vote, None, election_hash.clone());
+        node1.insert_vote(vote1.clone());
+        let vote2 = Vote::new(node2.id.clone(), vote_hash2.clone(), round, value2, VoteType::Vote, None, election_hash.clone());
+        node1.insert_vote(vote2.clone());
+        let vote3 = Vote::new(node3.id.clone(), vote_hash3.clone(), round, value3, VoteType::Vote, None, election_hash.clone());
+        node1.insert_vote(vote3.clone());
+        let vote4 = Vote::new(node4.id.clone(), vote_hash4.clone(), round, value4, VoteType::Vote, None, election_hash.clone());
+        node1.insert_vote(vote4.clone());
+        let vote5 = Vote::new(node5.id.clone(), vote_hash5.clone(), round, value5, VoteType::Vote, None, election_hash.clone());
+        node1.insert_vote(vote5.clone());
+        let mut proof = BTreeSet::new();
+        proof.insert(vote1.vote_hash);
+        proof.insert(vote2.vote_hash);
+        proof.insert(vote3.vote_hash);
+        proof.insert(vote4.vote_hash);
+        proof.insert(vote5.vote_hash);
+        let vote_hash7 = Vote::vote_hash(Round(1), Value::Zero, node1.id, VoteType::Commit);
+        let vote7 = Vote::new(node1.id, vote_hash7, Round(1), Value::Zero, VoteType::Commit, Some(proof.clone()), election_hash.clone());
+        assert_eq!(node1.validate_vote(vote7.clone()), true);
+        let vote_hash8 = Vote::vote_hash(Round(1), Value::Zero, node2.id, VoteType::Commit);
+        let vote8 = Vote::new(node2.id, vote_hash8, Round(1), Value::Zero, VoteType::Commit, Some(proof.clone()), election_hash.clone());
+        let vote_hash9 = Vote::vote_hash(Round(1), Value::Zero, node3.id, VoteType::Commit);
+        let vote9 = Vote::new(node3.id, vote_hash9, Round(1), Value::Zero, VoteType::Commit, Some(proof.clone()), election_hash.clone());
+        let vote_hash10 = Vote::vote_hash(Round(1), Value::Zero, node4.id, VoteType::Commit);
+        let vote10 = Vote::new(node4.id, vote_hash10, Round(1), Value::Zero, VoteType::Commit, Some(proof.clone()), election_hash.clone());
+        let vote_hash11 = Vote::vote_hash(Round(1), Value::Zero, node5.id, VoteType::Commit);
+        let vote11 = Vote::new(node5.id, vote_hash11, Round(1), Value::Zero, VoteType::Commit, Some(proof.clone()), election_hash.clone());
+        //assert_eq!(node1.validate_vote(vote8.clone()), true);
+        //assert_eq!(node1.validate_vote(vote9.clone()), true);
+        //assert_eq!(node1.validate_vote(vote10.clone()), true);
+        //assert_eq!(node1.validate_vote(vote11.clone()), true);
+        node1.insert_vote(vote7.clone());
+        node1.insert_vote(vote8.clone());
+        node1.insert_vote(vote9.clone());
+        node1.insert_vote(vote10.clone());
+        node1.insert_vote(vote11.clone());
+        //println!("{:?}", node1);
+        let mut new_proof = BTreeSet::new();
+        new_proof.insert(vote7.vote_hash);
+        new_proof.insert(vote8.vote_hash);
+        new_proof.insert(vote9.vote_hash);
+        new_proof.insert(vote10.vote_hash);
+        new_proof.insert(vote11.vote_hash);
+        let vote_hash12 = Vote::vote_hash(Round(1), Value::Zero, node1.id, VoteType::Commit);
+        let vote12 = Vote::new(node1.id, vote_hash12, Round(2), Value::Zero, VoteType::Commit, Some(new_proof.clone()), election_hash.clone());
+        //println!("vote: {:?}", node1);
+        assert_eq!(node1.validate_vote(vote12), true);
     }
 }

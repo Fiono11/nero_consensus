@@ -13,6 +13,7 @@ pub(crate) struct VoteHash(pub(crate) Hash);
 pub(crate) enum VoteType {
     Vote,
     Commit,
+    Decide,
 }
 
 #[derive(Debug, Clone, Ord, PartialOrd, Eq, PartialEq)]
