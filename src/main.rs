@@ -42,12 +42,7 @@ fn main() {
     let mut hashes = BTreeSet::new();
 
     for _ in 0..NUMBER_OF_TXS {
-        let mut buf = vec![];
-        let mut rng = thread_rng();
-        let random = rng.gen_range(0, i64::MAX);
-        buf.write_i64::<LittleEndian>(random);
-        let digest = digest::digest(&digest::SHA256, &buf);
-        let election_hash = ElectionHash(Hash(digest.as_ref().to_vec()));
+        let election_hash= ElectionHash::random();
         let vote = Vote::random(NodeId(id as u64), election_hash.clone());
         hashes.insert(election_hash.clone());
 
@@ -63,10 +58,10 @@ fn main() {
             let vote = Vote::random(NodeId(id as u64), election_hash.clone());
             //votes.push(vote.clone());
             let mut election = Election::new(election_hash.clone());
-            let rs = election.insert_vote(vote.clone(), true);
-            election.state.insert(vote.round, rs);
             let mut node = net.nodes.get_mut(&(id as u64)).unwrap().lock().unwrap();
-            node.elections.insert(election_hash.clone(), election.clone());
+            node.insert_vote(vote.clone());
+            //election.state.insert(vote.round, rs);
+            //node.elections.insert(election_hash.clone(), election.clone());
             node.send_vote(vote.clone());
         //}
 

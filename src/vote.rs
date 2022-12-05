@@ -22,9 +22,9 @@ pub(crate) struct Vote {
     pub(crate) vote_hash: VoteHash,
     pub(crate) round: Round,
     pub(crate) value: Value,
-    pub(crate) voted_value: Value,
-    pub(crate) committed_value: Value,
-    pub(crate) decided_value: Value,
+    //pub(crate) voted_value: Value,
+    //pub(crate) committed_value: Value,
+    //pub(crate) decided_value: Value,
     pub(crate) vote_type: VoteType,
     pub(crate) proof: Option<BTreeSet<VoteHash>>,
     pub(crate) election_hash: ElectionHash,
@@ -50,9 +50,9 @@ impl Vote {
             vote_hash: vote_hash(round, value, signer),
             round,
             value,
-            voted_value: Value::Zero,
-            committed_value: Value::Zero,
-            decided_value: Value::Zero,
+            //voted_value: Value::Zero,
+            //committed_value: Value::Zero,
+            //decided_value: Value::Zero,
             vote_type: VoteType::Vote,
             proof: None,
             election_hash,
@@ -76,7 +76,7 @@ pub(crate) fn vote_hash(round: Round, value: Value, id: NodeId) -> VoteHash {
 
 impl Vote {
     pub(crate) fn new(signer: NodeId, vote_hash: VoteHash, round: Round, value: Value, vote_type: VoteType, proof: Option<BTreeSet<VoteHash>>, election_hash: ElectionHash) -> Self {
-        Self { signer, vote_hash, round, value, voted_value: Value::Zero, committed_value: Value::Zero, decided_value: Value::Zero, vote_type, proof, election_hash }
+        Self { signer, vote_hash, round, value, vote_type, proof, election_hash }
     }
 
     pub(crate) fn serialize(&self) -> Vec<u8> {
