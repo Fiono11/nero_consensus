@@ -47,7 +47,7 @@ impl Vote {
         Self {
             //origin: (),
             signer,
-            vote_hash: vote_hash(round, value, signer),
+            vote_hash: Vote::vote_hash(round, value, signer, VoteType::Vote),
             round,
             value,
             //voted_value: Value::Zero,
@@ -58,41 +58,26 @@ impl Vote {
             election_hash,
         }
     }
-}
 
-pub(crate) fn vote_hash(round: Round, value: Value, id: NodeId) -> VoteHash {
-    let mut buf = vec![];
-    buf.write_u32::<LittleEndian>(round.0).unwrap();
-    buf.write_u64::<LittleEndian>(id.0).unwrap();
-    if value == Zero {
-        buf.write_u64::<LittleEndian>(0).unwrap();
-    }
-    else {
-        buf.write_u64::<LittleEndian>(1).unwrap();
-    }
-    let digest = digest::digest(&digest::SHA256, &buf);
-    VoteHash(Hash(digest.as_ref().to_vec()))
-}
-
-impl Vote {
     pub(crate) fn new(signer: NodeId, vote_hash: VoteHash, round: Round, value: Value, vote_type: VoteType, proof: Option<BTreeSet<VoteHash>>, election_hash: ElectionHash) -> Self {
         Self { signer, vote_hash, round, value, vote_type, proof, election_hash }
     }
 
-    pub(crate) fn serialize(&self) -> Vec<u8> {
+    pub(crate) fn vote_hash(round: Round, value: Value, id: NodeId, vote_type: VoteType) -> VoteHash {
         let mut buf = vec![];
-        buf.write_u32::<LittleEndian>(self.round.0).unwrap();
-        if self.value == Zero {
+        buf.write_u32::<LittleEndian>(round.0).unwrap();
+        buf.write_u64::<LittleEndian>(id.0).unwrap();
+        if value == Zero {
             buf.write_u64::<LittleEndian>(0).unwrap();
-        }
-        else {
+        } else {
             buf.write_u64::<LittleEndian>(1).unwrap();
         }
-        buf
-    }
-
-    pub(crate) fn hash(&self) -> VoteHash {
-        let digest = digest::digest(&digest::SHA256, &self.serialize());
+        if vote_type == VoteType::Vote {
+            buf.write_u64::<LittleEndian>(0).unwrap();
+        } else {
+            buf.write_u64::<LittleEndian>(1).unwrap();
+        }
+        let digest = digest::digest(&digest::SHA256, &buf);
         VoteHash(Hash(digest.as_ref().to_vec()))
     }
 }
