@@ -30,6 +30,6 @@ impl ::std::fmt::Debug for Hash {
 
 #[derive(Debug, Clone, Ord, PartialOrd, Eq, PartialEq)]
 pub(crate) enum Message {
-    Vote(Vote),
+    SendVote(Vote),
     TimerExpired(Vote),
 }

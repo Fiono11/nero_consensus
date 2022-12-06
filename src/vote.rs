@@ -1,4 +1,5 @@
 use std::collections::BTreeSet;
+use std::fmt::Debug;
 use byteorder::{LittleEndian, WriteBytesExt};
 use rand::{Rng, thread_rng};
 use ring::digest;
@@ -9,14 +10,28 @@ use vote::Value::{One, Zero};
 #[derive(Eq, PartialEq, Clone, Ord, PartialOrd, Hash, Debug)]
 pub(crate) struct VoteHash(pub(crate) Hash);
 
-#[derive(Debug, Clone, Ord, PartialOrd, Eq, PartialEq)]
+#[derive(Debug, Clone, Ord, PartialOrd, Eq, PartialEq, Hash)]
 pub(crate) enum VoteType {
-    Vote,
+    InitialVote,
     Commit,
     Decide,
 }
 
-#[derive(Debug, Clone, Ord, PartialOrd, Eq, PartialEq)]
+#[derive(Clone)]
+pub(crate) struct Decision {
+    pub(crate) value: Value,
+    pub(crate) vote_type: VoteType,
+}
+
+impl Decision {
+    pub(crate) fn new(value: Value, vote_type: VoteType) -> Self {
+        Decision {
+            value, vote_type
+        }
+    }
+}
+
+#[derive(Debug, Clone, Ord, PartialOrd, Eq, PartialEq, Hash)]
 pub(crate) struct Vote {
     //pub(crate) origin: NodeId,
     pub(crate) signer: NodeId,
@@ -48,13 +63,13 @@ impl Vote {
         Self {
             //origin: (),
             signer,
-            vote_hash: Vote::vote_hash(round, value, signer, VoteType::Vote),
+            vote_hash: Vote::vote_hash(round, value, signer, VoteType::InitialVote),
             round,
             value,
             //voted_value: Value::Zero,
             //committed_value: Value::Zero,
             //decided_value: Value::Zero,
-            vote_type: VoteType::Vote,
+            vote_type: VoteType::InitialVote,
             proof: None,
             election_hash,
         }
@@ -73,7 +88,7 @@ impl Vote {
         } else {
             buf.write_u64::<LittleEndian>(1).unwrap();
         }
-        if vote_type == VoteType::Vote {
+        if vote_type == VoteType::InitialVote {
             buf.write_u64::<LittleEndian>(0).unwrap();
         } else {
             buf.write_u64::<LittleEndian>(1).unwrap();
@@ -81,4 +96,11 @@ impl Vote {
         let digest = digest::digest(&digest::SHA256, &buf);
         VoteHash(Hash(digest.as_ref().to_vec()))
     }
+}
+
+#[derive(PartialEq)]
+pub(crate) enum ValidationStatus {
+    Valid,
+    Invalid,
+    Pending,
 }

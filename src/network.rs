@@ -35,7 +35,7 @@ impl Network {
                 .map(|(id, _)| *id)
                 .collect();
             match msg {
-                Message::Vote(ref _msg) => {
+                Message::SendVote(ref _msg) => {
                     ids
                         .iter()
                         .map(|id| {
