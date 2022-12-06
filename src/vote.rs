@@ -98,7 +98,7 @@ impl Vote {
     }
 }
 
-#[derive(PartialEq)]
+#[derive(PartialEq, Debug, Clone)]
 pub(crate) enum ValidationStatus {
     Valid,
     Invalid,

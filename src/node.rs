@@ -8,6 +8,7 @@ use std::time::Duration;
 use election::{Election, ElectionHash, Round, RoundState, Tally};
 use general::{Message, QUORUM, SEMI_QUORUM};
 use general::Message::SendVote;
+use Network;
 use vote::{Decision, ValidationStatus, Value, Vote, VoteHash, VoteType};
 use vote::ValidationStatus::{Invalid, Pending, Valid};
 use vote::Value::{One, Zero};
@@ -314,7 +315,7 @@ impl Node {
     }
 }
 
-/*#[cfg(test)]
+#[cfg(test)]
 mod tests {
     use std::process::id;
     use Network;
@@ -332,16 +333,15 @@ mod tests {
         assert!(round_state.validated_votes.contains(&vote));
         assert!(round_state.voted);
         if vote.value == Zero {
-            assert_eq!(round_state.zero_votes, 1);
-            assert_eq!(round_state.zero_commits, 0);
-            assert_eq!(round_state.one_votes, 0);
-            assert_eq!(round_state.one_commits, 0);
-        }
-        else if vote.value == One {
-            assert_eq!(round_state.zero_votes, 0);
-            assert_eq!(round_state.zero_commits, 0);
-            assert_eq!(round_state.one_votes, 1);
-            assert_eq!(round_state.one_commits, 0);
+            assert_eq!(round_state.tally.zero_votes, 1);
+            assert_eq!(round_state.tally.zero_commits, 0);
+            assert_eq!(round_state.tally.one_votes, 0);
+            assert_eq!(round_state.tally.one_commits, 0);
+        } else if vote.value == One {
+            assert_eq!(round_state.tally.zero_votes, 0);
+            assert_eq!(round_state.tally.zero_commits, 0);
+            assert_eq!(round_state.tally.one_votes, 1);
+            assert_eq!(round_state.tally.one_commits, 0);
         }
     }
 
@@ -354,15 +354,15 @@ mod tests {
         let value = Value::Zero;
         let vote_hash = Vote::vote_hash(round, value, node.id, VoteType::InitialVote);
         let vote = Vote::new(node.id, vote_hash, round, value, VoteType::InitialVote, None, election_hash);
-        assert_eq!(node.validate_vote(vote), true);
+        assert_eq!(node.validate_vote(vote), Valid);
     }
 
     #[test]
     fn validate_vote1() {
         let mut network = Network::new();
-        let mut node1= network.nodes.get(&0).unwrap().lock().unwrap();
-        let mut node2= network.nodes.get(&1).unwrap().lock().unwrap();
-        let mut node3= network.nodes.get(&2).unwrap().lock().unwrap();
+        let mut node1 = network.nodes.get(&0).unwrap().lock().unwrap();
+        let mut node2 = network.nodes.get(&1).unwrap().lock().unwrap();
+        let mut node3 = network.nodes.get(&2).unwrap().lock().unwrap();
         let election_hash = ElectionHash::random();
         let round = Round(0);
         let value = Value::Zero;
@@ -381,7 +381,7 @@ mod tests {
         proof.insert(vote3.vote_hash);
         let vote_hash4 = Vote::vote_hash(Round(1), value, node1.id, VoteType::Commit);
         let vote = Vote::new(node1.id, vote_hash4, Round(1), value, VoteType::Commit, Some(proof), election_hash);
-        assert_eq!(node1.validate_vote(vote), true);
+        assert_eq!(node1.validate_vote(vote), Valid);
     }
 
     #[test]
@@ -410,7 +410,7 @@ mod tests {
         proof.insert(vote3.vote_hash);
         let vote_hash4 = Vote::vote_hash(Round(1), value1, node1.id, VoteType::InitialVote);
         let vote = Vote::new(node1.id, vote_hash4, Round(1), value1, VoteType::InitialVote, Some(proof), election_hash);
-        assert_eq!(node1.validate_vote(vote), true);
+        assert_eq!(node1.validate_vote(vote), Valid);
     }
 
     #[test]
@@ -440,7 +440,7 @@ mod tests {
         let vote_hash4 = Vote::vote_hash(Round(1), value1, node1.id, VoteType::Commit);
         let vote = Vote::new(node1.id, vote_hash4, Round(1), value1, VoteType::Commit, Some(proof), election_hash);
         println!("vote: {:?}", vote);
-        assert_eq!(node1.validate_vote(vote), false);
+        assert_eq!(node1.validate_vote(vote), Invalid);
     }
 
     #[test]
@@ -489,7 +489,7 @@ mod tests {
         proof.insert(vote6.vote_hash);
         let vote_hash7 = Vote::vote_hash(Round(1), Value::Zero, node1.id, VoteType::Commit);
         let vote = Vote::new(node1.id, vote_hash7, Round(1), Value::Zero, VoteType::Commit, Some(proof), election_hash);
-        assert_eq!(node1.validate_vote(vote), true);
+        assert_eq!(node1.validate_vote(vote), Valid);
     }
 
     #[test]
@@ -503,7 +503,7 @@ mod tests {
         let value1 = Value::One;
         let vote_hash1 = Vote::vote_hash(round, value1, node1.id.clone(), VoteType::InitialVote);
         let vote1 = Vote::new(node1.id.clone(), vote_hash1.clone(), round, value1, VoteType::Commit, None, election_hash.clone());
-        assert_eq!(node2.validate_vote(vote1), false);
+        assert_eq!(node2.validate_vote(vote1), Invalid);
     }
 
     #[test]
@@ -533,9 +533,9 @@ mod tests {
         let vote_hash4 = Vote::vote_hash(Round(1), value1, node1.id, VoteType::InitialVote);
         let vote = Vote::new(node1.id, vote_hash4, Round(1), value1, VoteType::InitialVote, Some(proof), election_hash);
         println!("vote: {:?}", vote);
-        assert_eq!(node1.validate_vote(vote.clone()), false);
+        assert_eq!(node1.validate_vote(vote.clone()), Pending);
         node1.insert_vote(vote3.clone());
-        assert_eq!(node1.validate_vote(vote), true);
+        assert_eq!(node1.validate_vote(vote), Valid);
     }
 
     #[test]
@@ -576,7 +576,7 @@ mod tests {
         proof.insert(vote5.vote_hash);
         let vote_hash7 = Vote::vote_hash(Round(1), Value::Zero, node1.id, VoteType::Commit);
         let vote7 = Vote::new(node1.id, vote_hash7, Round(1), Value::Zero, VoteType::Commit, Some(proof.clone()), election_hash.clone());
-        assert_eq!(node1.validate_vote(vote7.clone()), true);
+        assert_eq!(node1.validate_vote(vote7.clone()), Valid);
         let vote_hash8 = Vote::vote_hash(Round(1), Value::Zero, node2.id, VoteType::Commit);
         let vote8 = Vote::new(node2.id, vote_hash8, Round(1), Value::Zero, VoteType::Commit, Some(proof.clone()), election_hash.clone());
         let vote_hash9 = Vote::vote_hash(Round(1), Value::Zero, node3.id, VoteType::Commit);
@@ -602,9 +602,8 @@ mod tests {
         new_proof.insert(vote10.vote_hash);
         new_proof.insert(vote11.vote_hash);
         let vote_hash12 = Vote::vote_hash(Round(1), Value::Zero, node1.id, VoteType::Commit);
-        let vote12 = Vote::new(node1.id, vote_hash12, Round(2), Value::Zero, VoteType::Commit, Some(new_proof.clone()), election_hash.clone());
+        let vote12 = Vote::new(node1.id, vote_hash12, Round(2), Value::Zero, VoteType::Decide, Some(new_proof.clone()), election_hash.clone());
         //println!("vote: {:?}", node1);
-        assert_eq!(node1.validate_vote(vote12), true);
+        assert_eq!(node1.validate_vote(vote12), Valid);
     }
 }
-*/
