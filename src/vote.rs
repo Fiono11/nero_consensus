@@ -17,7 +17,7 @@ pub(crate) enum VoteType {
     Decide,
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub(crate) struct Decision {
     pub(crate) value: Value,
     pub(crate) vote_type: VoteType,

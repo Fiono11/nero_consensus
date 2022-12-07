@@ -52,7 +52,7 @@ pub(crate) struct RoundState {
     //pub(crate) voted_value: Option<Vote>,
     //pub(crate) committed: bool,
     pub(crate) timed_out: bool,
-    pub(crate) validated_votes: BTreeSet<Vote>,
+    pub(crate) validated_votes: HashMap<VoteHash, Vote>,
     //pub(crate) vote_by_hash: HashMap<VoteHash, Vote>,
     pub(crate) unvalidated_votes: HashMap<Vote, BTreeSet<VoteHash>>,
     pub(crate) election_hash: ElectionHash,
@@ -61,7 +61,7 @@ pub(crate) struct RoundState {
 impl RoundState {
     pub(crate) fn new(election_hash: ElectionHash) -> Self {
         Self {
-            validated_votes: BTreeSet::new(),
+            validated_votes: HashMap::new(),
             tally: Tally::new(),
             voted: false,
             //committed: false,
@@ -71,7 +71,7 @@ impl RoundState {
         }
     }
 
-    pub(crate) fn from(votes: BTreeSet<Vote>, tally: Tally, voted: bool, unvalidated_votes: HashMap<Vote, BTreeSet<VoteHash>>, timed_out: bool, election_hash: ElectionHash) -> Self {
+    pub(crate) fn from(votes: HashMap<VoteHash, Vote>, tally: Tally, voted: bool, unvalidated_votes: HashMap<Vote, BTreeSet<VoteHash>>, timed_out: bool, election_hash: ElectionHash) -> Self {
         Self { validated_votes: votes, tally, voted, timed_out, unvalidated_votes, election_hash }
     }
 
@@ -91,7 +91,7 @@ impl RoundState {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub(crate) struct Tally {
     pub(crate) zero_votes: u64,
     pub(crate) zero_commits: u64,

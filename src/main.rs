@@ -24,7 +24,7 @@ use std::thread::sleep;
 use std::time::Duration;
 use env_logger::{Builder, Env};
 use election::{Election, ElectionHash};
-use general::{Hash, NUMBER_OF_TOTAL_NODES, NUMBER_OF_TXS};
+use general::{Hash, NUMBER_OF_BYZANTINE_NODES, NUMBER_OF_TOTAL_NODES, NUMBER_OF_TXS};
 use network::Network;
 use node::NodeId;
 use vote::Vote;
@@ -59,7 +59,7 @@ fn main() {
             //votes.push(vote.clone());
             let mut election = Election::new(election_hash.clone());
             let mut node = net.nodes.get_mut(&(id as u64)).unwrap().lock().unwrap();
-            node.insert_vote(vote.clone());
+            //node.insert_vote(vote.clone());
             //election.state.insert(vote.round, rs);
             //node.elections.insert(election_hash.clone(), election.clone());
             node.send_vote(vote.clone());
@@ -73,14 +73,14 @@ fn main() {
 
     loop {
         let mut finished = true;
-        for i in 0..NUMBER_OF_TOTAL_NODES {
+        for i in NUMBER_OF_BYZANTINE_NODES..NUMBER_OF_TOTAL_NODES {
             if net.nodes.get(&(i as u64)).unwrap().lock().unwrap().decided.clone().len() != hashes.len() {
                 finished = false;
             }
         }
         let decided = net.nodes.get(&0).unwrap().lock().unwrap().decided.clone();
         if finished {
-            for i in 1..NUMBER_OF_TOTAL_NODES {
+            for i in NUMBER_OF_BYZANTINE_NODES..NUMBER_OF_TOTAL_NODES {
                 let other_decided = net.nodes.get(&(i as u64)).unwrap().lock().unwrap().decided.clone();
                 for hash in hashes.iter() {
                     assert_eq!(decided.get(&hash.clone()).unwrap(), other_decided.get(&hash.clone()).unwrap());
