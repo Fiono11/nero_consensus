@@ -40,18 +40,28 @@ impl Network {
                 .map(|(id, _)| *id)
                 .collect();
             match msg {
-                Message::SendVote(ref _msg) => {
-                    ids
-                        .iter()
-                        .map(|id| {
-                            nodes
-                                .get_mut(&id)
-                                .unwrap()
-                                .lock()
-                                .unwrap()
-                                .handle_message(&msg)
-                        })
-                        .collect::<Vec<_>>();
+                Message::SendVote(ref _msg, byzantine, id) => {
+                    if !byzantine {
+                        ids
+                            .iter()
+                            .map(|id| {
+                                nodes
+                                    .get_mut(&id)
+                                    .unwrap()
+                                    .lock()
+                                    .unwrap()
+                                    .handle_message(&msg)
+                            })
+                            .collect::<Vec<_>>();
+                    }
+                    else {
+                        nodes
+                            .get_mut(&id)
+                            .unwrap()
+                            .lock()
+                            .unwrap()
+                            .handle_message(&msg);
+                    }
                 }
                 Message::TimerExpired(ref _msg) => {
                     for id in ids {

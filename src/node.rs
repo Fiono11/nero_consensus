@@ -6,8 +6,9 @@ use std::process::id;
 use std::ptr::hash;
 use std::thread::sleep;
 use std::time::Duration;
+use rand::{Rng, thread_rng};
 use election::{Election, ElectionHash, Round, RoundState, Tally};
-use general::{Message, QUORUM, SEMI_QUORUM};
+use general::{Message, QUORUM, SEMI_QUORUM, TIMEOUT};
 use general::Message::SendVote;
 use ::{Network, NUMBER_OF_TOTAL_NODES};
 use vote::{Decision, ValidationStatus, Value, Vote, VoteHash, VoteType};
@@ -26,7 +27,7 @@ pub(crate) struct Node {
     pub(crate) decided: HashMap<ElectionHash, Value>,
     pub(crate) messages: u64,
     pub(crate) byzantine: bool,
-    //votes: BTreeSet<Vote>,
+    pub(crate) sent_votes: BTreeSet<Vote>,
 }
 
 impl Node {
@@ -38,13 +39,13 @@ impl Node {
             decided: HashMap::new(),
             messages: 0,
             byzantine,
-            //votes: BTreeSet::new(),
+            sent_votes: BTreeSet::new(),
         }
     }
 
     pub(crate) fn handle_message(&mut self, msg: &Message) {
         match msg {
-            Message::SendVote(vote) => self.handle_vote(vote),
+            Message::SendVote(vote, byzantine, id) => self.handle_vote(vote),
             Message::TimerExpired(vote) => self.handle_timeout(vote),
         }
     }
@@ -71,6 +72,13 @@ impl Node {
     }
 
     pub(crate) fn handle_vote(&mut self, vote: &Vote) {
+        let mut rng = thread_rng();
+        //let destination = rng.gen_range(0, NUMBER_OF_TOTAL_NODES) as u64;
+        let destination = 2;
+        if !self.sent_votes.contains(&vote) {
+            self.send_vote(vote.clone(), destination);
+        }
+        self.sent_votes.insert(vote.clone());
         info!("{:?} received {:?}", self.id, vote.clone());
         let mut election = Election::new(vote.election_hash.clone());
         let mut round_state = RoundState::new(vote.election_hash.clone());
@@ -90,7 +98,6 @@ impl Node {
         if !round_state.validated_votes.contains_key(&vote.vote_hash.clone()) {
             match self.validate_vote(vote.clone()) {
                 Valid => {
-                    //self.send_vote(vote.clone());
                     info!("{:?} is valid!", vote.clone());
                     if vote.signer == self.id {
                         round_state.voted = true;
@@ -102,7 +109,8 @@ impl Node {
                         let own_vote = Vote::random(self.id, vote.election_hash.clone());
                         round_state.validated_votes.insert(own_vote.vote_hash.clone(), own_vote.clone());
                         round_state.tally_vote(own_vote.clone());
-                        self.send_vote(own_vote.clone());
+
+                        self.send_vote(own_vote.clone(), destination);
                         round_state.voted = true;
                     }
                     election.state.insert(vote.round, round_state.clone());
@@ -121,7 +129,7 @@ impl Node {
                         next_round_state.tally_vote(next_round_vote.clone());
                         next_round_state.voted = true;
                         Self::set_timeout(self.id, self.sender.clone(), next_round_vote.clone());
-                        self.send_vote(next_round_vote.clone());
+                        self.send_vote(next_round_vote.clone(), destination);
                         if next_round_vote.vote_type == Decide {
                             info!("{:?} decided {:?} in {:?} of {:?}", self.id, next_round_vote.value, next_round_vote.round, next_round_vote.election_hash);
                             election.is_decided = true;
@@ -221,6 +229,13 @@ impl Node {
         if tally.zero_commits >= SEMI_QUORUM as u64 && tally.one_commits >= SEMI_QUORUM as u64 {
             info!("This should not happen!!!");
         }
+        else if tally.one_decides > 0 {
+            decision.vote_type = Decide;
+            decision.value = One;
+        }
+        else if tally.zero_decides > 0 {
+            decision.vote_type = Decide;
+        }
         else if tally.zero_commits >= QUORUM as u64 {
             //info!("Node {:?} decided value {:?}", self.id, Zero);
             decision.vote_type = Decide;
@@ -247,6 +262,9 @@ impl Node {
     }
 
     pub(crate) fn handle_timeout(&mut self, vote: &Vote) {
+        //let mut rng = thread_rng();
+        //let destination = rng.gen_range(0, NUMBER_OF_TOTAL_NODES) as u64;
+        let destination = 2;
         info!("{:?}: {:?} of {:?} timed out!", self.id, vote.round, vote.election_hash);
         let mut election = self.elections.get(&vote.election_hash).unwrap().clone();
         let mut round_state = election.state.get(&vote.round).unwrap().clone();
@@ -266,7 +284,7 @@ impl Node {
             next_round_state.tally_vote(next_round_vote.clone());
             next_round_state.voted = true;
             Self::set_timeout(self.id, self.sender.clone(), next_round_vote.clone());
-            self.send_vote(next_round_vote.clone());
+            self.send_vote(next_round_vote.clone(), destination);
             if next_round_vote.vote_type == Decide {
                 info!("{:?} decided {:?} in {:?} of {:?}", self.id, next_round_vote.value, next_round_vote.round, next_round_vote.election_hash);
                 election.is_decided = true;
@@ -299,7 +317,7 @@ impl Node {
         println!("Vote: {:?}", vote);*/
     }
 
-    pub(crate) fn send_vote(&mut self, vote: Vote) {
+    pub(crate) fn send_vote(&mut self, vote: Vote, destination: u64) {
         let msg = Message::SendVote(Vote {
             signer: self.id,
             vote_hash: vote.vote_hash,
@@ -311,7 +329,7 @@ impl Node {
             vote_type: vote.vote_type.clone(),
             proof: vote.proof,
             election_hash: vote.election_hash.clone(),
-        });
+        }, self.byzantine, destination);
         self.messages += 1;
         //if self.messages < 5 {
             self.sender.lock().unwrap().send((self.id, msg));
@@ -331,7 +349,7 @@ impl Node {
     pub(crate) fn set_timeout(id: NodeId, sender: Arc<Mutex<Sender<(NodeId, Message)>>>, vote: Vote) {
         let msg = Message::TimerExpired(vote.clone());
         thread::spawn(move || {
-            sleep(Duration::from_secs(0));
+            sleep(Duration::from_secs(TIMEOUT as u64));
             info!("{:?}: Timeout of {:?} of {:?} set!", id, vote.round, vote.election_hash);
             sender.lock().unwrap().send((id, msg.clone()));
         });

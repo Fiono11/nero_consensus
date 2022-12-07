@@ -1,4 +1,4 @@
-use Vote;
+use ::{NodeId, Vote};
 
 pub(crate) const NUMBER_OF_BYZANTINE_NODES: usize = 2;
 pub(crate) const NUMBER_OF_TOTAL_NODES: usize = 3 * NUMBER_OF_BYZANTINE_NODES + 1;
@@ -30,6 +30,6 @@ impl ::std::fmt::Debug for Hash {
 
 #[derive(Debug, Clone, Ord, PartialOrd, Eq, PartialEq)]
 pub(crate) enum Message {
-    SendVote(Vote),
+    SendVote(Vote, bool, u64),
     TimerExpired(Vote),
 }

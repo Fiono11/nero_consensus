@@ -45,8 +45,9 @@ fn main() {
         let election_hash= ElectionHash::random();
         let vote = Vote::random(NodeId(id as u64), election_hash.clone());
         hashes.insert(election_hash.clone());
-
-        let id = thread_rng().gen_range(0, net.nodes.len()) as u64;
+        let mut rng = thread_rng();
+        let destination = rng.gen_range(0, NUMBER_OF_TOTAL_NODES) as u64;
+        let id = rng.gen_range(0, net.nodes.len()) as u64;
         //let mut node = net.nodes.get_mut(&id).unwrap().lock().unwrap();
         //node.send_vote(vote.clone());
 
@@ -62,7 +63,7 @@ fn main() {
             //node.insert_vote(vote.clone());
             //election.state.insert(vote.round, rs);
             //node.elections.insert(election_hash.clone(), election.clone());
-            node.send_vote(vote.clone());
+            node.send_vote(vote.clone(), destination);
         //}
 
         //for i in 0..NUMBER_OF_TOTAL_NODES {
