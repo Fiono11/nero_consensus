@@ -25,17 +25,19 @@ pub(crate) struct Node {
     pub(crate) sender: Arc<Mutex<Sender<(NodeId, Message)>>>,
     pub(crate) decided: HashMap<ElectionHash, Value>,
     pub(crate) messages: u64,
+    pub(crate) byzantine: bool,
     //votes: BTreeSet<Vote>,
 }
 
 impl Node {
-    pub(crate) fn new(id: NodeId, sender: Arc<Mutex<Sender<(NodeId, Message)>>>) -> Self {
+    pub(crate) fn new(id: NodeId, byzantine: bool, sender: Arc<Mutex<Sender<(NodeId, Message)>>>) -> Self {
         Node {
             id,
             sender,
             elections: HashMap::new(),
             decided: HashMap::new(),
             messages: 0,
+            byzantine,
             //votes: BTreeSet::new(),
         }
     }
@@ -112,7 +114,7 @@ impl Node {
                     if let Some(rs) = election.state.get(&next_round) {
                         next_round_state = rs.clone();
                     }
-                    if round_state.validated_votes.len() >= NUMBER_OF_TOTAL_NODES && !next_round_state.voted {//&& round_state.timed_out {
+                    if round_state.validated_votes.len() >= QUORUM && !next_round_state.voted {//&& round_state.timed_out {
                         let decision = self.decide_vote(round_state.tally.clone());
                         let vote_hash = Vote::vote_hash(next_round, decision.value.clone(), self.id, decision.vote_type.clone());
                         let proof = Some(round_state.validated_votes.iter().map(|(hash, vote)| hash.clone()).collect());
@@ -266,72 +268,41 @@ impl Node {
                 return Valid;
             }
         }
-        /*if valid {
-            let vote1 = self.decide_vote( ,Round(vote.round.0 - 1), vote.election_hash.clone());
-            if vote1 != vote {
-                println!("vote1: {:?}", vote1);
-                valid = false;
-            }
-        }*/
         Invalid
     }
 
     pub(crate) fn decide_vote(&mut self, tally: Tally) -> Decision {
-        //let mut election = self.elections.get(&election_hash).unwrap().clone();
-        //let next_round = Round(round.0 + 1);
-        //let mut round_state = election.state.get(&round).unwrap().clone();
-        //println!("round_state: {:?}", round_state);
-        //let proof: Option<BTreeSet<VoteHash>> = Some(round_state.validated_votes.iter().map(|vote| vote.vote_hash.clone()).collect());
-        //println!("proof: {:?}", proof);
-        //let mut next_round_vote = Vote::new(self.id, Vote::vote_hash(next_round, Zero, self.id, VoteType::InitialVote), next_round, Zero, VoteType::InitialVote, proof, round_state.election_hash);
         let mut decision = Decision::new(Zero, InitialVote);
+        if self.byzantine {
+            return Decision::random();
+        }
         if tally.zero_commits >= SEMI_QUORUM as u64 && tally.one_commits >= SEMI_QUORUM as u64 {
             info!("This should not happen!!!");
         }
         else if tally.zero_commits >= QUORUM as u64 {
-            //election.is_decided = true;
-            //self.decided.insert(election.hash.clone(), Zero);
-            info!("Node {:?} decided value {:?}", self.id, Zero);
+            //info!("Node {:?} decided value {:?}", self.id, Zero);
             decision.vote_type = Decide;
-            //next_round_vote.vote_type = VoteType::Decide;
-            //next_round_vote.vote_hash = Vote::vote_hash(next_round, Zero, self.id, VoteType::Decide);
         }
         else if tally.one_commits >= QUORUM as u64 {
-            //election.is_decided = true;
-            //self.decided.insert(election.hash.clone(), One);
-            info!("Node {:?} decided value {:?}", self.id, One);
+            //info!("Node {:?} decided value {:?}", self.id, One);
             decision.value = One;
             decision.vote_type = Decide;
-            //next_round_vote.vote_hash = Vote::vote_hash(next_round, One, self.id, VoteType::Decide);
         }
         else if tally.zero_votes + tally.zero_commits >= QUORUM as u64 || tally.zero_commits >= SEMI_QUORUM as u64 {
             decision.vote_type = Commit;
-            //next_round_vote.vote_hash = Vote::vote_hash(next_round, Zero, self.id, VoteType::Commit);
         }
         else if tally.one_votes + tally.one_commits >= QUORUM as u64 || tally.one_commits >= SEMI_QUORUM as u64 {
             decision.value = One;
             decision.vote_type = Commit;
-            //next_round_vote.vote_hash = Vote::vote_hash(next_round, One, self.id, VoteType::Commit);
         }
         else if tally.zero_votes + tally.zero_commits >= SEMI_QUORUM as u64 {
             decision.vote_type = Commit;
-            //next_round_vote.vote_hash = Vote::vote_hash(next_round, Zero, self.id, VoteType::Commit);
         }
         else {
             decision.value = One;
-            //next_round_vote.vote_hash = Vote::vote_hash(next_round, One, self.id, VoteType::InitialVote);
-            //info!("CASE MISSING!!!");
         }
-        //info!("DECISION: {:?}", decision);
         decision
-        //next_round_vote
-        //let next_round_state = self.insert_vote(next_round_vote.clone());
-        //election.state.insert(next_round, next_round_state);
-        //self.elections.insert(election.hash.clone(), election.clone());
-        //self.send_vote(next_round_vote.clone());
     }
-
-    // fn first_vote
 
     pub(crate) fn handle_timeout(&mut self, vote: &Vote) {
         if !self.elections.contains_key(&vote.election_hash.clone()) {

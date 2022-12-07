@@ -6,6 +6,7 @@ use ring::digest;
 use election::{ElectionHash, Round};
 use ::{Hash, NodeId};
 use vote::Value::{One, Zero};
+use vote::VoteType::{Commit, InitialVote};
 
 #[derive(Eq, PartialEq, Clone, Ord, PartialOrd, Hash, Debug)]
 pub(crate) struct VoteHash(pub(crate) Hash);
@@ -25,6 +26,21 @@ pub(crate) struct Decision {
 
 impl Decision {
     pub(crate) fn new(value: Value, vote_type: VoteType) -> Self {
+        Decision {
+            value, vote_type
+        }
+    }
+
+    pub(crate) fn random() -> Self {
+        let mut rng = thread_rng();
+        let mut value = Zero;
+        let mut vote_type = InitialVote;
+        if rng.gen_range(0, 2) == 1 {
+            value = One;
+        }
+        if rng.gen_range(0, 2) == 1 {
+            vote_type = Commit;
+        }
         Decision {
             value, vote_type
         }

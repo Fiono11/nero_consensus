@@ -73,14 +73,14 @@ fn main() {
 
     loop {
         let mut finished = true;
-        for i in 0..NUMBER_OF_TOTAL_NODES {
+        for i in NUMBER_OF_BYZANTINE_NODES..NUMBER_OF_TOTAL_NODES {
             if net.nodes.get(&(i as u64)).unwrap().lock().unwrap().decided.clone().len() != hashes.len() {
                 finished = false;
             }
         }
-        let decided = net.nodes.get(&0).unwrap().lock().unwrap().decided.clone();
+        let decided = net.nodes.get(&(NUMBER_OF_BYZANTINE_NODES as u64)).unwrap().lock().unwrap().decided.clone();
         if finished {
-            for i in 1..NUMBER_OF_TOTAL_NODES {
+            for i in NUMBER_OF_BYZANTINE_NODES + 1..NUMBER_OF_TOTAL_NODES {
                 let other_decided = net.nodes.get(&(i as u64)).unwrap().lock().unwrap().decided.clone();
                 for hash in hashes.iter() {
                     assert_eq!(decided.get(&hash.clone()).unwrap(), other_decided.get(&hash.clone()).unwrap());

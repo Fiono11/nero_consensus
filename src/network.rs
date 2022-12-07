@@ -4,7 +4,7 @@ use std::sync::mpsc::{channel, Receiver};
 use std::thread;
 use general::{Message, NUMBER_OF_TOTAL_NODES};
 use node::Node;
-use NodeId;
+use ::{NodeId, NUMBER_OF_BYZANTINE_NODES};
 
 
 #[derive(Debug)]
@@ -16,10 +16,15 @@ pub(crate) struct Network {
 impl Network {
     pub(crate) fn new() -> Self {
         let (sender, receiver) = channel();
+        let mut nodes = HashMap::new();
+        for i in 0..NUMBER_OF_BYZANTINE_NODES {
+            nodes.insert(i as u64, Arc::new(Mutex::new(Node::new(NodeId(i as u64), true, Arc::new(Mutex::new(sender.clone()))))));
+        }
+        for i in NUMBER_OF_BYZANTINE_NODES..NUMBER_OF_TOTAL_NODES {
+            nodes.insert(i as u64, Arc::new(Mutex::new(Node::new(NodeId(i as u64), false, Arc::new(Mutex::new(sender.clone()))))));
+        }
         Network {
-            nodes: (0..NUMBER_OF_TOTAL_NODES as u64)
-                .map(|id| (id, Arc::new(Mutex::new(Node::new(NodeId(id), Arc::new(Mutex::new(sender.clone())))))))
-                .collect(),
+            nodes,
             receiver: Arc::new(Mutex::new(receiver)),
         }
     }
