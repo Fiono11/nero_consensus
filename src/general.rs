@@ -4,7 +4,7 @@ pub(crate) const NUMBER_OF_BYZANTINE_NODES: usize = 2;
 pub(crate) const NUMBER_OF_TOTAL_NODES: usize = 3 * NUMBER_OF_BYZANTINE_NODES + 1;
 pub(crate) const QUORUM: usize = 2 * NUMBER_OF_BYZANTINE_NODES + 1;
 pub(crate) const SEMI_QUORUM: usize = NUMBER_OF_BYZANTINE_NODES + 1;
-pub(crate) const NUMBER_OF_TXS: usize = 10;
+pub(crate) const NUMBER_OF_TXS: usize = 1;
 pub(crate) const TIMEOUT: usize = 1;
 
 #[derive(Eq, PartialEq, Clone, Ord, PartialOrd, Hash)]
