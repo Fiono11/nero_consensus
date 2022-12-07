@@ -9,7 +9,7 @@ use std::time::Duration;
 use election::{Election, ElectionHash, Round, RoundState, Tally};
 use general::{Message, QUORUM, SEMI_QUORUM};
 use general::Message::SendVote;
-use Network;
+use ::{Network, NUMBER_OF_TOTAL_NODES};
 use vote::{Decision, ValidationStatus, Value, Vote, VoteHash, VoteType};
 use vote::ValidationStatus::{Invalid, Pending, Valid};
 use vote::Value::{One, Zero};
@@ -75,7 +75,6 @@ impl Node {
         if let Some(e) = self.elections.get(&vote.election_hash) {
             election = e.clone();
             if let Some(rs) = election.state.get(&vote.round) {
-                info!("!!!!!!!!!!!!!!!!!!!");
                 round_state = rs.clone();
             }
         }
@@ -84,18 +83,19 @@ impl Node {
         if !round_state.validated_votes.contains_key(&vote.vote_hash.clone()) {
             match self.validate_vote(vote.clone()) {
                 Valid => {
+                    //self.send_vote(vote.clone());
                     info!("{:?} is valid!", vote.clone());
                     //self.insert_vote(vote.clone());
                     if vote.signer == self.id {
                         round_state.voted = true;
                     }
                     round_state.tally_vote(vote.clone());
-                    info!("rs of {:?}: {:?}", self.id, round_state.clone());
                     round_state.validated_votes.insert(vote.vote_hash.clone(), vote.clone());
                     round_state = self.validate_pending_votes(vote.clone(), round_state.clone());
                     if !round_state.voted && vote.round.0 == 0 {
-                        let mut own_vote = vote.clone();
-                        own_vote.vote_hash = Vote::vote_hash(own_vote.round, own_vote.value.clone(), self.id, own_vote.vote_type.clone());
+                        let own_vote = Vote::random(self.id, vote.election_hash.clone());
+                        //let mut own_vote = vote.clone();
+                        //own_vote.vote_hash = Vote::vote_hash(own_vote.round, own_vote.value.clone(), self.id, own_vote.vote_type.clone());
                         //let own_vote = Vote::random(self.id, vote.election_hash.clone());
                         round_state.validated_votes.insert(own_vote.vote_hash.clone(), own_vote.clone());
                         round_state.tally_vote(own_vote.clone());
@@ -112,10 +112,8 @@ impl Node {
                     if let Some(rs) = election.state.get(&next_round) {
                         next_round_state = rs.clone();
                     }
-                    if round_state.validated_votes.len() >= QUORUM && !next_round_state.voted {//&& round_state.timed_out {
-                        info!("TALLY: {:?}", round_state.tally.clone());
+                    if round_state.validated_votes.len() >= NUMBER_OF_TOTAL_NODES && !next_round_state.voted {//&& round_state.timed_out {
                         let decision = self.decide_vote(round_state.tally.clone());
-                        info!("Decision: {:?}", decision.clone());
                         let vote_hash = Vote::vote_hash(next_round, decision.value.clone(), self.id, decision.vote_type.clone());
                         let proof = Some(round_state.validated_votes.iter().map(|(hash, vote)| hash.clone()).collect());
                         let next_round_vote = Vote::new(self.id, vote_hash, next_round, decision.value.clone(), decision.vote_type.clone(), proof, vote.election_hash.clone());
@@ -123,13 +121,18 @@ impl Node {
                         next_round_state.tally_vote(next_round_vote.clone());
                         next_round_state.voted = true;
                         //self.insert_vote(next_round_vote.clone());
-                        info!("VOTE: {:?}", next_round_vote.clone());
                         self.send_vote(next_round_vote.clone());
                         if next_round_vote.vote_type == Decide {
+                            info!("{:?} decided {:?} in {:?} of {:?}", self.id, next_round_vote.value, next_round_vote.round, next_round_vote.election_hash);
                             election.is_decided = true;
                             self.decided.insert(next_round_vote.election_hash.clone(), next_round_vote.value.clone());
                         }
-                        election.state.insert(next_round, next_round_state.clone());
+                        if !election.is_decided {
+                            election.state.insert(next_round, next_round_state.clone());
+                        }
+                        else {
+                            self.elections.remove(&election.hash);
+                        }
                     }
                 },
                 Invalid => {
@@ -191,16 +194,16 @@ impl Node {
     }
 
     pub(crate) fn insert_vote(&mut self, vote: Vote) {
-        /*let mut round_state = RoundState::new(vote.election_hash.clone());
+        let mut round_state = RoundState::new(vote.election_hash.clone());
         let mut election = Election::new(vote.election_hash.clone());
         if let Some(e) = self.elections.get(&vote.election_hash.clone()) {
             election = e.clone();
             if let Some(rs) = election.state.get(&vote.round) {
                 round_state = rs.clone();
             }
-        }*/
-        let mut election = self.elections.get(&vote.election_hash).unwrap().clone();
-        let mut round_state = election.state.get(&vote.round).unwrap().clone();
+        }
+        //let mut election = self.elections.get(&vote.election_hash).unwrap().clone();
+        //let mut round_state = election.state.get(&vote.round).unwrap().clone();
         if vote.signer == self.id {
             round_state.voted = true;
         }
@@ -238,11 +241,11 @@ impl Node {
                         proof_tally.insert(rs.validated_votes.get(&vote).unwrap().clone());
                     }
                     let p = Tally::from_votes(proof_tally.clone());
-                    info!("proof: {:?}", proof_tally);
-                    info!("votes: {:?}", votes);
-                    info!("proof tally: {:?}", p);
-                    info!("tally: {:?}", tally);
-                    info!("vote: {:?}", vote);
+                    //info!("proof: {:?}", proof_tally);
+                    //info!("votes: {:?}", votes);
+                    //info!("proof tally: {:?}", p);
+                    //info!("tally: {:?}", tally);
+                    //info!("vote: {:?}", vote);
                     //assert_eq!(tally, vote.tally);
                     let decision = self.decide_vote(tally.clone());
                     if decision.vote_type == vote.vote_type && decision.value == vote.value {
@@ -319,7 +322,7 @@ impl Node {
             //next_round_vote.vote_hash = Vote::vote_hash(next_round, One, self.id, VoteType::InitialVote);
             //info!("CASE MISSING!!!");
         }
-        info!("DECISION: {:?}", decision);
+        //info!("DECISION: {:?}", decision);
         decision
         //next_round_vote
         //let next_round_state = self.insert_vote(next_round_vote.clone());
@@ -363,14 +366,17 @@ impl Node {
             election_hash: vote.election_hash.clone(),
         });
         self.messages += 1;
-        if self.messages < 5 {
+        //if self.messages < 5 {
             self.sender.lock().unwrap().send((self.id, msg));
-        }
+        //}
         if vote.vote_type == Commit {
             info!("{:?} committed value {:?} in round {:?} of election {:?}", self.id, vote.value, vote.round, vote.election_hash.clone());
         }
-        else {
+        else if vote.vote_type == InitialVote {
             info!("{:?} voted value {:?} in round {:?} of election {:?}", self.id, vote.value, vote.round, vote.election_hash.clone());
+        }
+        else if vote.vote_type == Decide {
+            info!("{:?} decided value {:?} in round {:?} of election {:?}", self.id, vote.value, vote.round, vote.election_hash.clone());
         }
         //println!("State of election of node {:?}: {:?}", self.id, self.elections.get(&vote.election_hash).unwrap());
     }
@@ -401,7 +407,7 @@ mod tests {
         node.insert_vote(vote.clone());
         let election = node.elections.get(&election_hash.clone()).unwrap();
         let round_state = election.state.get(&Round(0)).unwrap();
-        assert!(round_state.validated_votes.contains(&vote));
+        assert!(round_state.validated_votes.contains_key(&vote.vote_hash.clone()));
         assert!(round_state.voted);
         if vote.value == Zero {
             assert_eq!(round_state.tally.zero_votes, 1);
