@@ -3,11 +3,11 @@ use std::process::id;
 use byteorder::{LittleEndian, WriteBytesExt};
 use rand::{Rng, thread_rng};
 use ring::digest;
-use ::{Hash, Vote};
-use general::QUORUM;
-use NodeId;
-use vote::Value::{One, Zero};
-use vote::{Value, VoteHash, VoteType};
+use crate::general::QUORUM;
+use crate::node::NodeId;
+use crate::vote::Value::{One, Zero};
+use crate::vote::{Value, Vote, VoteHash, VoteType};
+use crate::general::Hash;
 
 #[derive(Eq, PartialEq, Clone, Ord, PartialOrd, Hash, Debug)]
 pub(crate) struct ElectionHash(pub(crate) Hash);
@@ -16,7 +16,7 @@ impl ElectionHash {
     pub(crate) fn random() -> Self {
         let mut buf = vec![];
         let mut rng = thread_rng();
-        let random = rng.gen_range(0, i64::MAX);
+        let random = rng.gen_range(0..i64::MAX);
         buf.write_i64::<LittleEndian>(random);
         let digest = digest::digest(&digest::SHA256, &buf);
         ElectionHash(Hash(digest.as_ref().to_vec()))

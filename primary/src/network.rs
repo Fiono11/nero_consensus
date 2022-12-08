@@ -2,9 +2,8 @@ use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use std::sync::mpsc::{channel, Receiver};
 use std::thread;
-use general::{Message, NUMBER_OF_TOTAL_NODES};
-use node::Node;
-use ::{NodeId, NUMBER_OF_BYZANTINE_NODES};
+use crate::general::{Message, NUMBER_OF_BYZANTINE_NODES, NUMBER_OF_TOTAL_NODES};
+use crate::node::{Node, NodeId};
 
 
 #[derive(Debug)]

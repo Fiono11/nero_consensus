@@ -1,4 +1,4 @@
-use ::{NodeId, Vote};
+use crate::vote::Vote;
 
 pub(crate) const NUMBER_OF_BYZANTINE_NODES: usize = 2;
 pub(crate) const NUMBER_OF_TOTAL_NODES: usize = 3 * NUMBER_OF_BYZANTINE_NODES + 1;

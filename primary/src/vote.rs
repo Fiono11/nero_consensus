@@ -3,10 +3,11 @@ use std::fmt::Debug;
 use byteorder::{LittleEndian, WriteBytesExt};
 use rand::{Rng, thread_rng};
 use ring::digest;
-use election::{ElectionHash, Round};
-use ::{Hash, NodeId};
-use vote::Value::{One, Zero};
-use vote::VoteType::{Commit, InitialVote};
+use crate::election::{ElectionHash, Round};
+use crate::general::Hash;
+use crate::node::NodeId;
+use crate::vote::Value::{One, Zero};
+use crate::vote::VoteType::{Commit, InitialVote};
 
 #[derive(Eq, PartialEq, Clone, Ord, PartialOrd, Hash, Debug)]
 pub(crate) struct VoteHash(pub(crate) Hash);
@@ -35,10 +36,10 @@ impl Decision {
         let mut rng = thread_rng();
         let mut value = Zero;
         let mut vote_type = InitialVote;
-        if rng.gen_range(0, 2) == 1 {
+        if rng.gen_range(0..2) == 1 {
             value = One;
         }
-        if rng.gen_range(0, 2) == 1 {
+        if rng.gen_range(0..2) == 1 {
             vote_type = Commit;
         }
         Decision {
@@ -73,7 +74,7 @@ impl Vote {
         let round = Round(0);
         let mut rng = thread_rng();
         let mut value = Zero;
-        if rng.gen_range(0, 2) == 1 {
+        if rng.gen_range(0..2) == 1 {
             value = One;
         }
         Self {

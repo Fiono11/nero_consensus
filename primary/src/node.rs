@@ -6,15 +6,14 @@ use std::process::id;
 use std::ptr::hash;
 use std::thread::sleep;
 use std::time::Duration;
+use log::info;
 use rand::{Rng, thread_rng};
-use election::{Election, ElectionHash, Round, RoundState, Tally};
-use general::{Message, QUORUM, SEMI_QUORUM, TIMEOUT};
-use general::Message::SendVote;
-use ::{Network, NUMBER_OF_TOTAL_NODES};
-use vote::{Decision, ValidationStatus, Value, Vote, VoteHash, VoteType};
-use vote::ValidationStatus::{Invalid, Pending, Valid};
-use vote::Value::{One, Zero};
-use vote::VoteType::{Commit, Decide, InitialVote};
+use crate::election::{Election, ElectionHash, Round, RoundState, Tally};
+use crate::general::{Message, QUORUM, SEMI_QUORUM, TIMEOUT};
+use crate::vote::ValidationStatus::{Invalid, Pending, Valid};
+use crate::vote::{Decision, ValidationStatus, Value, Vote};
+use crate::vote::Value::{One, Zero};
+use crate::vote::VoteType::{Commit, Decide, InitialVote};
 
 #[derive(Debug, Clone, Ord, PartialOrd, Eq, PartialEq, Copy, Hash)]
 pub(crate) struct NodeId(pub(crate) u64);
@@ -360,6 +359,10 @@ impl Node {
 mod tests {
     use std::process::id;
     use Network;
+    use crate::network::Network;
+    use crate::vote::Value::{One, Zero};
+    use crate::vote::{Value, Vote, VoteType};
+    use crate::vote::ValidationStatus::{Pending, Valid};
     use super::*;
 
     #[test]
