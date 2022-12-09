@@ -22,7 +22,7 @@ use std::string::String;
 use std::sync::Arc;
 use crate::election::{Election, ElectionHash, Round, RoundState, Tally};
 use crate::general::{PrimaryMessage, QUORUM, SEMI_QUORUM};
-use crate::{BlockHash, Transaction};
+use crate::{BlockHash, Transaction, VoteHash};
 use crate::vote::{Decision, PrimaryVote, ValidationStatus, Value};
 use crate::vote::ValidationStatus::{Invalid, Pending, Valid};
 use crate::vote::Value::{One, Zero};
@@ -170,7 +170,7 @@ impl Core {
         let bytes = Bytes::from(serialized.clone());
         //if !addresses.is_empty() {
             let delay = rand::thread_rng().gen_range(0..1000) as u64;
-            sleep(Duration::from_millis(delay)).await;
+            //sleep(Duration::from_millis(delay)).await;
             info!("Message {:?} sent to {:?} with a delay of {:?} ms", message, addresses, delay);
             let handlers = self.network.broadcast(addresses, bytes.clone()).await;
         //}
@@ -294,8 +294,11 @@ impl Core {
             //}
         }
         if !round_state.voted {
-            let own_vote = PrimaryVote::random(self.id, tx.digest());
-            round_state.validated_votes.insert(own_vote.vote_hash.clone(), own_vote.clone());
+            let mut own_vote = PrimaryVote::random(self.id, tx.digest()).await;
+            info!("vote: {:?}", own_vote);
+            //own_vote.vote_hash = PrimaryVote::vote_hash(Round(0), own_vote.value.clone(), self.id, own_vote.vote_type.clone()).await;
+            info!("hash: {:?}", own_vote.digest());
+            round_state.validated_votes.insert(VoteHash(own_vote.digest()), own_vote.clone());
             round_state.tally_vote(own_vote.clone());
             self.broadcast_message(PrimaryMessage::SendVote(own_vote.clone()), addresses.clone(), own_vote.round).await;
             //self.send_vote(own_vote.clone(), destination);
@@ -335,7 +338,7 @@ impl Core {
         else {
             //Self::set_timeout(self.id, self.sender.clone(), vote.clone());
         }
-        if !round_state.validated_votes.contains_key(&vote.vote_hash.clone()) {
+        if !round_state.validated_votes.contains_key(&VoteHash(vote.digest())) {
             match self.validate_vote(vote.clone()).await {
                 Valid => {
                     info!("{:?} is valid!", vote.clone());
@@ -343,11 +346,12 @@ impl Core {
                         round_state.voted = true;
                     }
                     round_state.tally_vote(vote.clone());
-                    round_state.validated_votes.insert(vote.vote_hash.clone(), vote.clone());
+                    round_state.validated_votes.insert(VoteHash(vote.digest()), vote.clone());
                     //round_state = self.validate_pending_votes(vote.clone(), round_state.clone());
                     if !round_state.voted && vote.round.0 == 0 {
-                        let own_vote = PrimaryVote::random(self.id, vote.election_hash.clone());
-                        round_state.validated_votes.insert(own_vote.vote_hash.clone(), own_vote.clone());
+                        let mut own_vote = PrimaryVote::random(self.id, vote.election_hash.clone()).await;
+                        //own_vote.vote_hash = PrimaryVote::vote_hash(Round(0), own_vote.value.clone(), self.id, own_vote.vote_type.clone()).await;
+                        round_state.validated_votes.insert(VoteHash(own_vote.digest()), own_vote.clone());
                         round_state.tally_vote(own_vote.clone());
                         self.broadcast_message(PrimaryMessage::SendVote(own_vote.clone()), addresses.clone(), own_vote.round).await;
                         //self.send_vote(own_vote.clone(), destination);
@@ -362,10 +366,10 @@ impl Core {
                     }
                     if round_state.validated_votes.len() >= QUORUM && !next_round_state.voted {//&& round_state.timed_out {
                         let decision = self.decide_vote(round_state.tally.clone()).await;
-                        let vote_hash = PrimaryVote::vote_hash(next_round, decision.value.clone(), self.id, decision.vote_type.clone());
+                        //let vote_hash = PrimaryVote::vote_hash(next_round, decision.value.clone(), self.id, decision.vote_type.clone()).await;
                         let proof = Some(round_state.validated_votes.iter().map(|(hash, vote)| hash.clone()).collect());
-                        let next_round_vote = PrimaryVote::new(self.id, vote_hash, next_round, decision.value.clone(), decision.vote_type.clone(), proof, vote.election_hash.clone());
-                        next_round_state.validated_votes.insert(next_round_vote.vote_hash.clone(), next_round_vote.clone());
+                        let next_round_vote = PrimaryVote::new(self.id, next_round, decision.value.clone(), decision.vote_type.clone(), proof, vote.election_hash.clone());
+                        next_round_state.validated_votes.insert(VoteHash(next_round_vote.digest()), next_round_vote.clone());
                         next_round_state.tally_vote(next_round_vote.clone());
                         next_round_state.voted = true;
                         //Self::set_timeout(self.id, self.sender.clone(), next_round_vote.clone());

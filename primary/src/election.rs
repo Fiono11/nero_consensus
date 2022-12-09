@@ -5,10 +5,10 @@ use rand::{Rng, thread_rng};
 use ring::digest;
 use crate::general::QUORUM;
 use crate::vote::Value::{One, Zero};
-use crate::vote::{Value, PrimaryVote, VoteHash, VoteType};
+use crate::vote::{Value, PrimaryVote, VoteType};
 use crate::general::Hash;
 use serde::{Serialize, Deserialize};
-use crate::BlockHash;
+use crate::{BlockHash, VoteHash};
 
 #[derive(Eq, PartialEq, Clone, Ord, PartialOrd, Hash, Debug, Serialize, Deserialize)]
 pub struct ElectionHash(pub Hash);
@@ -26,6 +26,12 @@ impl ElectionHash {
 
 #[derive(Debug, Clone, Ord, PartialOrd, Eq, PartialEq, Copy, Hash, Serialize, Deserialize)]
 pub struct Round(pub u32);
+
+impl AsRef<[u8]> for Round {
+    fn as_ref(&self) -> &[u8] {
+        &self.as_ref()
+    }
+}
 
 #[derive(Debug, Clone)]
 pub struct Election {

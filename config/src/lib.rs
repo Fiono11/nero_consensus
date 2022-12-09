@@ -177,7 +177,7 @@ impl Committee {
     pub fn others_primaries(&self, myself: &PublicKey) -> Vec<(PublicKey, PrimaryAddresses)> {
         self.authorities
             .iter()
-            .filter(|(name, authority)| name != &myself && authority.byzantine == false)
+            //.filter(|(name, authority)| name != &myself && authority.byzantine == false)
             .map(|(name, authority)| (*name, authority.primary.clone()))
             .collect()
     }
