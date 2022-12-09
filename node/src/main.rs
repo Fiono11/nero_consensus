@@ -8,7 +8,7 @@ use env_logger::Env;
 use log::info;
 use store::Store;
 use tokio::sync::mpsc::{channel, Receiver};
-use primary::{Primary, NodeId, PrimaryVote};
+use primary::{Primary, PrimaryVote};
 
 /// The default channel capacity.
 pub const CHANNEL_CAPACITY: usize = 1_000;
@@ -89,7 +89,7 @@ async fn run(matches: &ArgMatches<'_>) -> Result<()> {
     // Channels the sequence of certificates.
     let (tx_output, rx_output) = channel(CHANNEL_CAPACITY);
 
-    let id = NodeId(0);
+    //let id = NodeId(0);
 
     // Check whether to run a primary, a worker, or an entire authority.
     match matches.subcommand() {
@@ -101,7 +101,7 @@ async fn run(matches: &ArgMatches<'_>) -> Result<()> {
                 parameters.clone(),
                 store,
                 byzantine_node,
-                id
+                //id
             );
         }
         _ => unreachable!(),

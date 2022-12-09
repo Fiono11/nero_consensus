@@ -14,7 +14,7 @@ use tokio::sync::mpsc::{channel, Receiver, Sender};
 use crate::core::Core;
 use crate::error::DagError;
 use crate::general::PrimaryMessage;
-use crate::node::NodeId;
+use crate::Transaction;
 use crate::vote::PrimaryVote;
 
 /// The default channel capacity for each channel of the worker.
@@ -40,7 +40,7 @@ impl Primary {
         parameters: Parameters,
         store: Store,
         byzantine_node: bool,
-        id: NodeId,
+        //id: NodeId,
     ) {
         // Write the parameters to the logs.
         parameters.log();
@@ -54,12 +54,12 @@ impl Primary {
             byzantine_node,
         };
 
-        //let (tx_transactions, rx_batch_maker) = channel(CHANNEL_CAPACITY);
+        let (tx_transactions, rx_batch_maker) = channel(CHANNEL_CAPACITY);
         let (tx_votes, rx_votes) = channel(CHANNEL_CAPACITY);
         //let (tx_decisions, rx_decisions) = channel(CHANNEL_CAPACITY);
 
         // Spawn all primary tasks.
-        primary.handle_messages(tx_votes);
+        primary.handle_messages(tx_transactions, tx_votes);
 
         // The `SignatureService` is used to require signatures on specific digests.
         let signature_service = SignatureService::new(keypair.secret.clone());
@@ -73,7 +73,7 @@ impl Primary {
             committee.clone(),
             primary.parameters.batch_size,
             primary.parameters.max_batch_delay,
-            //rx_batch_maker,
+            rx_batch_maker,
             committee
                 .others_primaries(&keypair.name)
                 .iter()
@@ -81,7 +81,7 @@ impl Primary {
                 .collect(),
             rx_votes,
             byzantine_node,
-            id
+            //id
             //rx_decisions,
         );
 
@@ -105,7 +105,7 @@ impl Primary {
     }
 
     /// Spawn all tasks responsible to handle clients transactions.
-    fn handle_messages(&self, tx_votes: Sender<PrimaryVote>) {
+    fn handle_messages(&self, tx_transactions: Sender<Vec<Transaction>>, tx_votes: Sender<PrimaryVote>) {
         // We first receive clients' transactions from the network.
         let mut address = self
             .committee
@@ -115,7 +115,7 @@ impl Primary {
         address.set_ip("127.0.0.1".parse().unwrap());
         SimpleReceiver::spawn(
             address,
-            /* handler */ TxReceiverHandler { tx_votes },
+            /* handler */ TxReceiverHandler { tx_transactions, tx_votes },
         );
 
         info!(
@@ -128,7 +128,7 @@ impl Primary {
 /// Defines how the network receiver handles incoming transactions.
 #[derive(Clone)]
 struct TxReceiverHandler {
-    //tx_batch_maker: Sender<Vec<Transaction>>,
+    tx_transactions: Sender<Vec<Transaction>>,
     tx_votes: Sender<PrimaryVote>,
     //tx_decisions: Sender<(BlockHash, PublicKey, usize)>
     // only one channel for primary messages
@@ -139,13 +139,13 @@ impl MessageHandler for TxReceiverHandler {
     async fn dispatch(&self, _writer: &mut Writer, message: Bytes) -> Result<(), Box<dyn Error>> {
         // Send the transaction to the batch maker.
         match bincode::deserialize(&message).map_err(DagError::SerializationError)? {
-            /*PrimaryMessage::Transactions(txs) => {
+            PrimaryMessage::Transactions(txs) => {
                 //info!("Received {:?}", tx.digest().0);
-                self.tx_batch_maker
+                self.tx_transactions
                     .send(txs)
                     .await
                     .expect("Failed to send transaction")
-            },*/
+            },
             PrimaryMessage::SendVote(vote) => {
                 self.tx_votes
                     .send(vote)

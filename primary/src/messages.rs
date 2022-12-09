@@ -6,7 +6,7 @@ use ed25519_dalek::{Digest as _, Sha512};
 use config::Committee;
 use crypto::{Digest, Hash, PublicKey, Signature, SignatureService};
 use serde::{Deserialize, Serialize};
-use crate::ensure;
+use crate::{ensure, PrimaryVote};
 use crate::error::{DagError, DagResult};
 
 #[derive(Debug, Clone, Eq, Hash, PartialEq, Serialize, Deserialize, Ord, PartialOrd)]
@@ -88,7 +88,7 @@ impl Transaction {
     }
 }
 
-#[derive(Clone, Serialize, Deserialize, Ord, PartialOrd, Eq, PartialEq)]
+/*#[derive(Clone, Serialize, Deserialize, Ord, PartialOrd, Eq, PartialEq)]
 pub struct PrimaryVote {
     pub tx: BlockHash,
     pub decision: usize,
@@ -185,4 +185,4 @@ pub enum PrimaryMessage {
     Vote(PrimaryVote),
     //Transactions(Vec<Transaction>),
     //Decision((BlockHash, PublicKey, usize))
-}
+}*/

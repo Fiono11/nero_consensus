@@ -12,8 +12,8 @@ use std::net::SocketAddr;
 use tokio::net::TcpStream;
 use tokio::time::{interval, sleep, Duration, Instant};
 use tokio_util::codec::{Framed, LengthDelimitedCodec};
-use crypto::Digest;
-use primary::{ElectionHash, NodeId, now, Primary, PrimaryMessage, PrimaryVote};
+use crypto::{Digest, PublicKey};
+use primary::{ElectionHash, now, ParentHash, Payload, Primary, PrimaryMessage, PrimaryVote, Transaction};
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -103,11 +103,11 @@ impl Client {
 
         // Submit all transactions.
         let burst = self.rate / PRECISION;
-        //let mut tx = Transaction::new();
-        //let mut txs = vec![];
-        //let mut payload = BytesMut::with_capacity(self.size);
+        let mut tx = Transaction::new();
+        let mut txs = vec![];
+        let mut payload = BytesMut::with_capacity(self.size);
         //let mut r = rand::thread_rng().gen();
-        //let mut r = 0;
+        let mut r = 0;
         let mut transport = Framed::new(stream, LengthDelimitedCodec::new());
         let interval = interval(Duration::from_millis(BURST_DURATION));
         tokio::pin!(interval);
@@ -127,29 +127,29 @@ impl Client {
                     payload.put_u8(0u8); // Sample txs start with 0.
                     payload.put_u64(counter); // This counter identifies the tx.
                 } else {*/
-                    //r += 1;
-                    //payload.put_u8(1u8); // Standard txs start with 1.
-                    //payload.put_u64(r); // Ensures all clients send different txs.
+                //r += 1;
+                payload.put_u8(1u8); // Standard txs start with 1.
+                //payload.put_u64(r); // Ensures all clients send different txs.
                 //};
 
-                //payload.resize(self.size, 0u8);
-                //let bytes = payload.split().freeze();
+                payload.resize(self.size, 0u8);
+                let bytes = payload.split().freeze();
                 //let mut p = [0; 32];
                 //p.copy_from_slice(&bytes.to_vec()[..]);
-                //tx.payload = Payload(bytes.to_vec());
-                //tx.timestamp = now();
-                //tx.parent = ParentHash(Digest::default());
-                //txs.push(tx.clone());
-                //let transaction = bincode::serialize(&PrimaryMessage::Transactions(txs.clone())).unwrap();
-                let vote = bincode::serialize(&PrimaryMessage::SendVote(PrimaryVote::random(NodeId(0), ElectionHash::random()))).unwrap();
+                tx.payload = Payload(bytes.to_vec());
+                tx.timestamp = now();
+                tx.parent = ParentHash(Digest::default());
+                txs.push(tx.clone());
+                let transaction = bincode::serialize(&PrimaryMessage::Transactions(txs.clone())).unwrap();
+                //let vote = bincode::serialize(&PrimaryMessage::SendVote(PrimaryVote::random(PublicKey::default(), ElectionHash::random()))).unwrap();
 
-                if let Err(e) = transport.send(Bytes::from(vote)).await {
+                if let Err(e) = transport.send(Bytes::from(transaction)).await {
                     warn!("Failed to send transaction: {}", e);
                     //break 'main;
                     break;
                 }
 
-                info!("Sent vote!");
+                info!("Sent txs: {:?}", txs);
             }
             if present.elapsed().as_millis() > BURST_DURATION as u128 {
                 // NOTE: This log entry is used to compute performance.

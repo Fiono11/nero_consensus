@@ -22,7 +22,7 @@ use std::string::String;
 use std::sync::Arc;
 use crate::election::{Election, ElectionHash, Round, RoundState, Tally};
 use crate::general::{PrimaryMessage, QUORUM, SEMI_QUORUM};
-use crate::node::NodeId;
+use crate::{BlockHash, Transaction};
 use crate::vote::{Decision, PrimaryVote, ValidationStatus, Value};
 use crate::vote::ValidationStatus::{Invalid, Pending, Valid};
 use crate::vote::Value::{One, Zero};
@@ -35,7 +35,7 @@ use crate::vote::VoteType::{Commit, Decide, InitialVote};
 /// Assemble clients transactions into batches.
 pub struct Core {
     /// The public key of this primary.
-    name: PublicKey,
+    id: PublicKey,
     /// Service to sign votes.
     signature_service: SignatureService,
     /// Committee
@@ -45,7 +45,7 @@ pub struct Core {
     /// The maximum delay after which to seal the batch (in ms).
     max_batch_delay: u64,
     // Channel to receive transactions from the network.
-    //rx_transaction: Receiver<Vec<Transaction>>,
+    rx_transaction: Receiver<Vec<Transaction>>,
     /// The network addresses of the other primaries.
     primary_addresses: Vec<(PublicKey, SocketAddr)>,
     // Holds the current batch.
@@ -70,10 +70,10 @@ pub struct Core {
     //current_tx: BlockHash,
     rounds_expired: BTreeSet<usize>,
 
-    elections: HashMap<ElectionHash, Election>,
-    id: NodeId,
+    elections: HashMap<BlockHash, Election>,
+    //id: NodeId,
     //sender: Arc<Mutex<Sender<(NodeId, Message)>>>,
-    decided: HashMap<ElectionHash, Value>,
+    decided: HashMap<BlockHash, Value>,
     messages: u64,
     byzantine: bool,
     sent_votes: BTreeSet<PrimaryVote>,
@@ -116,26 +116,26 @@ impl Tally {
 impl Core {
     #[allow(clippy::too_many_arguments)]
     pub fn spawn(
-        name: PublicKey,
+        id: PublicKey,
         signature_service: SignatureService,
         committee: Committee,
         batch_size: usize,
         max_batch_delay: u64,
-        //rx_transaction: Receiver<Vec<Transaction>>,
+        rx_transaction: Receiver<Vec<Transaction>>,
         primary_addresses: Vec<(PublicKey, SocketAddr)>,
         rx_votes: Receiver<PrimaryVote>,
         byzantine: bool,
         //rx_decisions: Receiver<(BlockHash, PublicKey, usize)>,
-        id: NodeId,
+        //id: NodeId,
     ) {
         tokio::spawn(async move {
             Self {
-                name,
+                id,
                 signature_service,
                 committee,
                 batch_size,
                 max_batch_delay,
-                //rx_transaction,
+                rx_transaction,
                 primary_addresses,
                 //current_batch: Batch::with_capacity(batch_size * 2),
                 current_batch_size: 0,
@@ -157,7 +157,7 @@ impl Core {
                 messages: 0,
                 byzantine,
                 sent_votes: BTreeSet::new(),
-                id,
+                //id,
             }
             .run()
             .await;
@@ -278,6 +278,37 @@ impl Core {
         decision
     }*/
 
+    pub async fn handle_transaction(&mut self, tx: &Transaction) {
+        let (public_keys, mut addresses): (Vec<PublicKey>, Vec<SocketAddr>) = self.primary_addresses.iter().cloned().unzip();
+        info!("{:?} received {:?}", self.id, tx);
+        let mut election = Election::new(tx.digest());
+        let mut round_state = RoundState::new(tx.digest());
+        // only if vote is valid
+        if let Some(e) = self.elections.get(&tx.digest()) {
+            election = e.clone();
+            if let Some(rs) = election.state.get(&Round(0)) {
+                round_state = rs.clone();
+            }
+            //else {
+            //Self::set_timeout(self.id, self.sender.clone(), vote.clone());
+            //}
+        }
+        if !round_state.voted {
+            let own_vote = PrimaryVote::random(self.id, tx.digest());
+            round_state.validated_votes.insert(own_vote.vote_hash.clone(), own_vote.clone());
+            round_state.tally_vote(own_vote.clone());
+            self.broadcast_message(PrimaryMessage::SendVote(own_vote.clone()), addresses.clone(), own_vote.round).await;
+            //self.send_vote(own_vote.clone(), destination);
+            round_state.voted = true;
+        }
+        else {
+            //Self::set_timeout(self.id, self.sender.clone(), vote.clone());
+        }
+        election.state.insert(Round(0), round_state.clone());
+        self.elections.insert(tx.digest(), election.clone());
+        info!("State of election of node {:?}: {:?}", self.id, election);
+    }
+
     pub async fn handle_vote(&mut self, vote: &PrimaryVote) {
         let (public_keys, mut addresses): (Vec<PublicKey>, Vec<SocketAddr>) = self.primary_addresses.iter().cloned().unzip();
         //let mut rng = thread_rng();
@@ -329,7 +360,7 @@ impl Core {
                     if let Some(rs) = election.state.get(&next_round) {
                         next_round_state = rs.clone();
                     }
-                    if round_state.validated_votes.len() >= QUORUM && !next_round_state.voted && round_state.timed_out {
+                    if round_state.validated_votes.len() >= QUORUM && !next_round_state.voted {//&& round_state.timed_out {
                         let decision = self.decide_vote(round_state.tally.clone()).await;
                         let vote_hash = PrimaryVote::vote_hash(next_round, decision.value.clone(), self.id, decision.vote_type.clone());
                         let proof = Some(round_state.validated_votes.iter().map(|(hash, vote)| hash.clone()).collect());
@@ -459,6 +490,12 @@ impl Core {
         loop {
             tokio::select! {
                 Some(vote) = self.rx_votes.recv() => self.handle_vote(&vote).await,
+
+                Some(transactions) = self.rx_transaction.recv() => {
+                    for transaction in transactions {
+                        self.handle_transaction(&transaction).await;
+                    }
+                }
 
                 //Some(Message::TimerExpired(vote)) => self.handle_timeout(vote),
 

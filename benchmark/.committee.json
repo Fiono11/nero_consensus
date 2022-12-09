@@ -1,27 +1,27 @@
 {
     "authorities": {
-        "bKuVMnTy83JKhWErPeobr02x7hXIfCSbnuXXfr2F42Q=": {
+        "/K7A0woR1uMpRp1BPG2bF4hB79m3FjN8lWL9DMx7u4M=": {
             "byzantine": false,
             "primary": {
                 "transactions": "127.0.0.1:3002"
             },
             "stake": 1
         },
-        "chQaUsou/AH8LkaT5f8tgnW2BLnvL1px/myLU3ch2L8=": {
-            "byzantine": true,
-            "primary": {
-                "transactions": "127.0.0.1:3003"
-            },
-            "stake": 1
-        },
-        "etObujpotjQcKDItlEtPBOoYm55JIOrRF4IyBHDouN0=": {
+        "/eqhxgcA2X61fN7w8ovidwWBYfDZHNyYz+rRCulhos8=": {
             "byzantine": false,
             "primary": {
                 "transactions": "127.0.0.1:3000"
             },
             "stake": 1
         },
-        "zw+v/zyFzycpFqxQUOVJD5YIshq8S3GscFHho5LlK1I=": {
+        "LBItJRBBfRxz6xRSKQdm4CdyRIK5yWOUTeEq9m/5xcE=": {
+            "byzantine": true,
+            "primary": {
+                "transactions": "127.0.0.1:3003"
+            },
+            "stake": 1
+        },
+        "QxKVJ0Chh65C3hfqEpRd4kT4MocTXdM0WikjB783T98=": {
             "byzantine": false,
             "primary": {
                 "transactions": "127.0.0.1:3001"

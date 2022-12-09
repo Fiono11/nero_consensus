@@ -1,5 +1,6 @@
 use crate::vote::PrimaryVote;
 use serde::{Serialize, Deserialize};
+use crate::Transaction;
 
 pub const NUMBER_OF_BYZANTINE_NODES: usize = 2;
 pub const NUMBER_OF_TOTAL_NODES: usize = 3 * NUMBER_OF_BYZANTINE_NODES + 1;
@@ -33,4 +34,5 @@ impl ::std::fmt::Debug for Hash {
 pub enum PrimaryMessage {
     SendVote(PrimaryVote),
     TimerExpired(PrimaryVote),
+    Transactions(Vec<Transaction>),
 }

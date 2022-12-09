@@ -4,11 +4,11 @@ use byteorder::{LittleEndian, WriteBytesExt};
 use rand::{Rng, thread_rng};
 use ring::digest;
 use crate::general::QUORUM;
-use crate::node::NodeId;
 use crate::vote::Value::{One, Zero};
 use crate::vote::{Value, PrimaryVote, VoteHash, VoteType};
 use crate::general::Hash;
 use serde::{Serialize, Deserialize};
+use crate::BlockHash;
 
 #[derive(Eq, PartialEq, Clone, Ord, PartialOrd, Hash, Debug, Serialize, Deserialize)]
 pub struct ElectionHash(pub Hash);
@@ -29,13 +29,13 @@ pub struct Round(pub u32);
 
 #[derive(Debug, Clone)]
 pub struct Election {
-    pub hash: ElectionHash,
+    pub hash: BlockHash,
     pub state: HashMap<Round, RoundState>,
     pub is_decided: bool,
 }
 
 impl Election {
-    pub fn new(hash: ElectionHash) -> Self {
+    pub fn new(hash: BlockHash) -> Self {
         Election {
             hash,
             is_decided: false,
@@ -53,11 +53,11 @@ pub struct RoundState {
     pub timed_out: bool,
     pub validated_votes: HashMap<VoteHash, PrimaryVote>,
     pub unvalidated_votes: HashMap<PrimaryVote, BTreeSet<VoteHash>>,
-    pub election_hash: ElectionHash,
+    pub election_hash: BlockHash,
 }
 
 impl RoundState {
-    pub fn new(election_hash: ElectionHash) -> Self {
+    pub fn new(election_hash: BlockHash) -> Self {
         Self {
             validated_votes: HashMap::new(),
             tally: Tally::new(),
@@ -68,7 +68,7 @@ impl RoundState {
         }
     }
 
-    pub fn from(votes: HashMap<VoteHash, PrimaryVote>, tally: Tally, voted: bool, unvalidated_votes: HashMap<PrimaryVote, BTreeSet<VoteHash>>, timed_out: bool, election_hash: ElectionHash) -> Self {
+    pub fn from(votes: HashMap<VoteHash, PrimaryVote>, tally: Tally, voted: bool, unvalidated_votes: HashMap<PrimaryVote, BTreeSet<VoteHash>>, timed_out: bool, election_hash: BlockHash) -> Self {
         Self { validated_votes: votes, tally, voted, timed_out, unvalidated_votes, election_hash }
     }
 
