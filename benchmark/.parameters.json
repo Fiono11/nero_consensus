@@ -1,0 +1,6 @@
+{
+    "batch_size": 500000,
+    "max_batch_delay": 500,
+    "sync_retry_delay": 10000,
+    "sync_retry_nodes": 3
+}

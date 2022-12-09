@@ -279,11 +279,13 @@ impl Core {
     }*/
 
     pub async fn handle_vote(&mut self, vote: &PrimaryVote) {
+        let (public_keys, mut addresses): (Vec<PublicKey>, Vec<SocketAddr>) = self.primary_addresses.iter().cloned().unzip();
         //let mut rng = thread_rng();
         //let destination = rng.gen_range(0, NUMBER_OF_TOTAL_NODES) as u64;
         let destination = 2;
         if !self.sent_votes.contains(&vote) {
             //self.send_vote(vote.clone(), destination);
+            self.broadcast_message(PrimaryMessage::SendVote(vote.clone()), addresses.clone(), vote.round);
         }
         self.sent_votes.insert(vote.clone());
         info!("{:?} received {:?}", self.id, vote.clone());
@@ -316,7 +318,7 @@ impl Core {
                         let own_vote = PrimaryVote::random(self.id, vote.election_hash.clone());
                         round_state.validated_votes.insert(own_vote.vote_hash.clone(), own_vote.clone());
                         round_state.tally_vote(own_vote.clone());
-
+                        self.broadcast_message(PrimaryMessage::SendVote(own_vote.clone()), addresses.clone(), own_vote.round).await;
                         //self.send_vote(own_vote.clone(), destination);
                         round_state.voted = true;
                     }
@@ -337,6 +339,7 @@ impl Core {
                         next_round_state.voted = true;
                         //Self::set_timeout(self.id, self.sender.clone(), next_round_vote.clone());
                         //self.send_vote(next_round_vote.clone(), destination);
+                        self.broadcast_message(PrimaryMessage::SendVote(next_round_vote.clone()), addresses.clone(), next_round_vote.round).await;
                         if next_round_vote.vote_type == Decide {
                             info!("{:?} decided {:?} in {:?} of {:?}", self.id, next_round_vote.value, next_round_vote.round, next_round_vote.election_hash);
                             election.is_decided = true;

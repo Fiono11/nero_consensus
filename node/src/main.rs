@@ -8,7 +8,7 @@ use env_logger::Env;
 use log::info;
 use store::Store;
 use tokio::sync::mpsc::{channel, Receiver};
-use primary::{Primary, NodeId};
+use primary::{Primary, NodeId, PrimaryVote};
 
 /// The default channel capacity.
 pub const CHANNEL_CAPACITY: usize = 1_000;
@@ -87,7 +87,7 @@ async fn run(matches: &ArgMatches<'_>) -> Result<()> {
     let store = Store::new(store_path).context("Failed to create a store")?;
 
     // Channels the sequence of certificates.
-    //let (tx_output, rx_output) = channel(CHANNEL_CAPACITY);
+    let (tx_output, rx_output) = channel(CHANNEL_CAPACITY);
 
     let id = NodeId(0);
 
@@ -108,18 +108,18 @@ async fn run(matches: &ArgMatches<'_>) -> Result<()> {
     }
 
     // Analyze the consensus' output.
-    //analyze(rx_output).await;
+    analyze(rx_output).await;
 
     // If this expression is reached, the program ends and all other tasks terminate.
     unreachable!();
     //Ok(())
 }
 
-/*/// Receives an ordered list of certificates and apply any application-specific logic.
+/// Receives an ordered list of certificates and apply any application-specific logic.
 async fn analyze(mut rx_output: Receiver<PrimaryVote>) {
     while let Some(tx) = rx_output.recv().await {
         // NOTE: Here goes the application logic.
         info!("Confirmed tx: {:#?}", tx);
     }
-}*/
+}
 
