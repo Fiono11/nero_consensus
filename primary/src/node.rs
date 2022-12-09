@@ -9,28 +9,29 @@ use std::time::Duration;
 use log::info;
 use rand::{Rng, thread_rng};
 use crate::election::{Election, ElectionHash, Round, RoundState, Tally};
-use crate::general::{Message, QUORUM, SEMI_QUORUM, TIMEOUT};
+use crate::general::{PrimaryMessage, QUORUM, SEMI_QUORUM, TIMEOUT};
 use crate::vote::ValidationStatus::{Invalid, Pending, Valid};
-use crate::vote::{Decision, ValidationStatus, Value, Vote};
+use crate::vote::{Decision, ValidationStatus, Value, PrimaryVote};
 use crate::vote::Value::{One, Zero};
 use crate::vote::VoteType::{Commit, Decide, InitialVote};
+use serde::{Serialize, Deserialize};
 
-#[derive(Debug, Clone, Ord, PartialOrd, Eq, PartialEq, Copy, Hash)]
-pub(crate) struct NodeId(pub(crate) u64);
+#[derive(Debug, Clone, Ord, PartialOrd, Eq, PartialEq, Copy, Hash, Serialize, Deserialize)]
+pub struct NodeId(pub u64);
 
 #[derive(Debug, Clone)]
 pub(crate) struct Node {
     pub(crate) elections: HashMap<ElectionHash, Election>,
     pub(crate) id: NodeId,
-    pub(crate) sender: Arc<Mutex<Sender<(NodeId, Message)>>>,
+    pub(crate) sender: Arc<Mutex<Sender<(NodeId, PrimaryMessage)>>>,
     pub(crate) decided: HashMap<ElectionHash, Value>,
     pub(crate) messages: u64,
     pub(crate) byzantine: bool,
-    pub(crate) sent_votes: BTreeSet<Vote>,
+    pub(crate) sent_votes: BTreeSet<PrimaryVote>,
 }
 
 impl Node {
-    pub(crate) fn new(id: NodeId, byzantine: bool, sender: Arc<Mutex<Sender<(NodeId, Message)>>>) -> Self {
+    pub(crate) fn new(id: NodeId, byzantine: bool, sender: Arc<Mutex<Sender<(NodeId, PrimaryMessage)>>>) -> Self {
         Node {
             id,
             sender,
@@ -42,14 +43,14 @@ impl Node {
         }
     }
 
-    pub(crate) fn handle_message(&mut self, msg: &Message) {
+    pub(crate) fn handle_message(&mut self, msg: &PrimaryMessage) {
         match msg {
-            Message::SendVote(vote, byzantine, id) => self.handle_vote(vote),
-            Message::TimerExpired(vote) => self.handle_timeout(vote),
+            PrimaryMessage::SendVote(vote) => self.handle_vote(vote),
+            PrimaryMessage::TimerExpired(vote) => self.handle_timeout(vote),
         }
     }
 
-    pub(crate) fn validate_pending_votes(&mut self, vote: Vote, mut round_state: RoundState) -> RoundState {
+    pub(crate) fn validate_pending_votes(&mut self, vote: PrimaryVote, mut round_state: RoundState) -> RoundState {
         let mut new_unvalidated_votes = round_state.unvalidated_votes.clone();
         for (v, vs) in new_unvalidated_votes {
             if vs.contains(&vote.vote_hash) {
@@ -70,7 +71,7 @@ impl Node {
         round_state
     }
 
-    pub(crate) fn handle_vote(&mut self, vote: &Vote) {
+    pub(crate) fn handle_vote(&mut self, vote: &PrimaryVote) {
         let mut rng = thread_rng();
         //let destination = rng.gen_range(0, NUMBER_OF_TOTAL_NODES) as u64;
         let destination = 2;
@@ -105,7 +106,7 @@ impl Node {
                     round_state.validated_votes.insert(vote.vote_hash.clone(), vote.clone());
                     round_state = self.validate_pending_votes(vote.clone(), round_state.clone());
                     if !round_state.voted && vote.round.0 == 0 {
-                        let own_vote = Vote::random(self.id, vote.election_hash.clone());
+                        let own_vote = PrimaryVote::random(self.id, vote.election_hash.clone());
                         round_state.validated_votes.insert(own_vote.vote_hash.clone(), own_vote.clone());
                         round_state.tally_vote(own_vote.clone());
 
@@ -121,9 +122,9 @@ impl Node {
                     }
                     if round_state.validated_votes.len() >= QUORUM && !next_round_state.voted && round_state.timed_out {
                         let decision = self.decide_vote(round_state.tally.clone());
-                        let vote_hash = Vote::vote_hash(next_round, decision.value.clone(), self.id, decision.vote_type.clone());
+                        let vote_hash = PrimaryVote::vote_hash(next_round, decision.value.clone(), self.id, decision.vote_type.clone());
                         let proof = Some(round_state.validated_votes.iter().map(|(hash, vote)| hash.clone()).collect());
-                        let next_round_vote = Vote::new(self.id, vote_hash, next_round, decision.value.clone(), decision.vote_type.clone(), proof, vote.election_hash.clone());
+                        let next_round_vote = PrimaryVote::new(self.id, vote_hash, next_round, decision.value.clone(), decision.vote_type.clone(), proof, vote.election_hash.clone());
                         next_round_state.validated_votes.insert(next_round_vote.vote_hash.clone(), next_round_vote.clone());
                         next_round_state.tally_vote(next_round_vote.clone());
                         next_round_state.voted = true;
@@ -156,7 +157,7 @@ impl Node {
         info!("State of election of node {:?}: {:?}", self.id, election);
     }
 
-    pub(crate) fn insert_vote(&mut self, vote: Vote) {
+    pub(crate) fn insert_vote(&mut self, vote: PrimaryVote) {
         let mut round_state = RoundState::new(vote.election_hash.clone());
         let mut election = Election::new(vote.election_hash.clone());
         if let Some(e) = self.elections.get(&vote.election_hash.clone()) {
@@ -177,7 +178,7 @@ impl Node {
         self.elections.insert(election.hash.clone(), election.clone());
     }
 
-    fn validate_vote(&mut self, vote: Vote) -> ValidationStatus {
+    fn validate_vote(&mut self, vote: PrimaryVote) -> ValidationStatus {
         if vote.round != Round(0) {
             if let Some(e) = self.elections.get(&vote.election_hash.clone()) {
                 if let Some(rs) = e.state.get(&Round(vote.round.0 - 1)) {
@@ -260,7 +261,7 @@ impl Node {
         decision
     }
 
-    pub(crate) fn handle_timeout(&mut self, vote: &Vote) {
+    pub(crate) fn handle_timeout(&mut self, vote: &PrimaryVote) {
         //let mut rng = thread_rng();
         //let destination = rng.gen_range(0, NUMBER_OF_TOTAL_NODES) as u64;
         let destination = 2;
@@ -276,9 +277,9 @@ impl Node {
         election.state.insert(vote.round, round_state.clone());
         if round_state.validated_votes.len() >= QUORUM && !next_round_state.voted && round_state.timed_out {
             let decision = self.decide_vote(round_state.tally.clone());
-            let vote_hash = Vote::vote_hash(next_round, decision.value.clone(), self.id, decision.vote_type.clone());
+            let vote_hash = PrimaryVote::vote_hash(next_round, decision.value.clone(), self.id, decision.vote_type.clone());
             let proof = Some(round_state.validated_votes.iter().map(|(hash, vote)| hash.clone()).collect());
-            let next_round_vote = Vote::new(self.id, vote_hash, next_round, decision.value.clone(), decision.vote_type.clone(), proof, vote.election_hash.clone());
+            let next_round_vote = PrimaryVote::new(self.id, vote_hash, next_round, decision.value.clone(), decision.vote_type.clone(), proof, vote.election_hash.clone());
             next_round_state.validated_votes.insert(next_round_vote.vote_hash.clone(), next_round_vote.clone());
             next_round_state.tally_vote(next_round_vote.clone());
             next_round_state.voted = true;
@@ -316,8 +317,8 @@ impl Node {
         println!("Vote: {:?}", vote);*/
     }
 
-    pub(crate) fn send_vote(&mut self, vote: Vote, destination: u64) {
-        let msg = Message::SendVote(Vote {
+    pub(crate) fn send_vote(&mut self, vote: PrimaryVote, destination: u64) {
+        let msg = PrimaryMessage::SendVote(PrimaryVote {
             signer: self.id,
             vote_hash: vote.vote_hash,
             round: vote.round,
@@ -328,7 +329,7 @@ impl Node {
             vote_type: vote.vote_type.clone(),
             proof: vote.proof,
             election_hash: vote.election_hash.clone(),
-        }, self.byzantine, destination);
+        });
         self.messages += 1;
         //if self.messages < 5 {
             self.sender.lock().unwrap().send((self.id, msg));
@@ -345,8 +346,8 @@ impl Node {
         //println!("State of election of node {:?}: {:?}", self.id, self.elections.get(&vote.election_hash).unwrap());
     }
 
-    pub(crate) fn set_timeout(id: NodeId, sender: Arc<Mutex<Sender<(NodeId, Message)>>>, vote: Vote) {
-        let msg = Message::TimerExpired(vote.clone());
+    pub(crate) fn set_timeout(id: NodeId, sender: Arc<Mutex<Sender<(NodeId, PrimaryMessage)>>>, vote: PrimaryVote) {
+        let msg = PrimaryMessage::TimerExpired(vote.clone());
         thread::spawn(move || {
             sleep(Duration::from_secs(TIMEOUT as u64));
             info!("{:?}: Timeout of {:?} of {:?} set!", id, vote.round, vote.election_hash);
@@ -361,7 +362,7 @@ mod tests {
     use Network;
     use crate::network::Network;
     use crate::vote::Value::{One, Zero};
-    use crate::vote::{Value, Vote, VoteType};
+    use crate::vote::{Value, PrimaryVote, VoteType};
     use crate::vote::ValidationStatus::{Pending, Valid};
     use super::*;
 
@@ -370,7 +371,7 @@ mod tests {
         let mut network = Network::new();
         let mut node = network.nodes.get_mut(&0).unwrap().lock().unwrap();
         let election_hash = ElectionHash::random();
-        let vote = Vote::random(node.id, election_hash.clone());
+        let vote = PrimaryVote::random(node.id, election_hash.clone());
         node.insert_vote(vote.clone());
         let election = node.elections.get(&election_hash.clone()).unwrap();
         let round_state = election.state.get(&Round(0)).unwrap();
@@ -396,8 +397,8 @@ mod tests {
         let election_hash = ElectionHash::random();
         let round = Round(0);
         let value = Value::Zero;
-        let vote_hash = Vote::vote_hash(round, value, node.id, VoteType::InitialVote);
-        let vote = Vote::new(node.id, vote_hash, round, value, VoteType::InitialVote, None, election_hash);
+        let vote_hash = PrimaryVote::vote_hash(round, value, node.id, VoteType::InitialVote);
+        let vote = PrimaryVote::new(node.id, vote_hash, round, value, VoteType::InitialVote, None, election_hash);
         assert_eq!(node.validate_vote(vote), Valid);
     }
 
@@ -410,21 +411,21 @@ mod tests {
         let election_hash = ElectionHash::random();
         let round = Round(0);
         let value = Value::Zero;
-        let vote_hash1 = Vote::vote_hash(round, value, node1.id.clone(), VoteType::InitialVote);
-        let vote_hash2 = Vote::vote_hash(round, value, node2.id.clone(), VoteType::InitialVote);
-        let vote_hash3 = Vote::vote_hash(round, value, node3.id.clone(), VoteType::InitialVote);
-        let vote1 = Vote::new(node1.id.clone(), vote_hash1.clone(), round, value, VoteType::InitialVote, None, election_hash.clone());
+        let vote_hash1 = PrimaryVote::vote_hash(round, value, node1.id.clone(), VoteType::InitialVote);
+        let vote_hash2 = PrimaryVote::vote_hash(round, value, node2.id.clone(), VoteType::InitialVote);
+        let vote_hash3 = PrimaryVote::vote_hash(round, value, node3.id.clone(), VoteType::InitialVote);
+        let vote1 = PrimaryVote::new(node1.id.clone(), vote_hash1.clone(), round, value, VoteType::InitialVote, None, election_hash.clone());
         node1.insert_vote(vote1.clone());
-        let vote2 = Vote::new(node2.id.clone(), vote_hash2.clone(), round, value, VoteType::InitialVote, None, election_hash.clone());
+        let vote2 = PrimaryVote::new(node2.id.clone(), vote_hash2.clone(), round, value, VoteType::InitialVote, None, election_hash.clone());
         node1.insert_vote(vote2.clone());
-        let vote3 = Vote::new(node3.id.clone(), vote_hash3.clone(), round, value, VoteType::InitialVote, None, election_hash.clone());
+        let vote3 = PrimaryVote::new(node3.id.clone(), vote_hash3.clone(), round, value, VoteType::InitialVote, None, election_hash.clone());
         node1.insert_vote(vote3.clone());
         let mut proof = BTreeSet::new();
         proof.insert(vote1.vote_hash);
         proof.insert(vote2.vote_hash);
         proof.insert(vote3.vote_hash);
-        let vote_hash4 = Vote::vote_hash(Round(1), value, node1.id, VoteType::Commit);
-        let vote = Vote::new(node1.id, vote_hash4, Round(1), value, VoteType::Commit, Some(proof), election_hash);
+        let vote_hash4 = PrimaryVote::vote_hash(Round(1), value, node1.id, VoteType::Commit);
+        let vote = PrimaryVote::new(node1.id, vote_hash4, Round(1), value, VoteType::Commit, Some(proof), election_hash);
         assert_eq!(node1.validate_vote(vote), Valid);
     }
 
@@ -439,21 +440,21 @@ mod tests {
         let value1 = Value::One;
         let value2 = Value::One;
         let value3 = Value::Zero;
-        let vote_hash1 = Vote::vote_hash(round, value1, node1.id.clone(), VoteType::InitialVote);
-        let vote_hash2 = Vote::vote_hash(round, value2, node2.id.clone(), VoteType::InitialVote);
-        let vote_hash3 = Vote::vote_hash(round, value3, node3.id.clone(), VoteType::InitialVote);
-        let vote1 = Vote::new(node1.id.clone(), vote_hash1.clone(), round, value1, VoteType::InitialVote, None, election_hash.clone());
+        let vote_hash1 = PrimaryVote::vote_hash(round, value1, node1.id.clone(), VoteType::InitialVote);
+        let vote_hash2 = PrimaryVote::vote_hash(round, value2, node2.id.clone(), VoteType::InitialVote);
+        let vote_hash3 = PrimaryVote::vote_hash(round, value3, node3.id.clone(), VoteType::InitialVote);
+        let vote1 = PrimaryVote::new(node1.id.clone(), vote_hash1.clone(), round, value1, VoteType::InitialVote, None, election_hash.clone());
         node1.insert_vote(vote1.clone());
-        let vote2 = Vote::new(node2.id.clone(), vote_hash2.clone(), round, value2, VoteType::InitialVote, None, election_hash.clone());
+        let vote2 = PrimaryVote::new(node2.id.clone(), vote_hash2.clone(), round, value2, VoteType::InitialVote, None, election_hash.clone());
         node1.insert_vote(vote2.clone());
-        let vote3 = Vote::new(node3.id.clone(), vote_hash3.clone(), round, value3, VoteType::InitialVote, None, election_hash.clone());
+        let vote3 = PrimaryVote::new(node3.id.clone(), vote_hash3.clone(), round, value3, VoteType::InitialVote, None, election_hash.clone());
         node1.insert_vote(vote3.clone());
         let mut proof = BTreeSet::new();
         proof.insert(vote1.vote_hash);
         proof.insert(vote2.vote_hash);
         proof.insert(vote3.vote_hash);
-        let vote_hash4 = Vote::vote_hash(Round(1), value1, node1.id, VoteType::InitialVote);
-        let vote = Vote::new(node1.id, vote_hash4, Round(1), value1, VoteType::InitialVote, Some(proof), election_hash);
+        let vote_hash4 = PrimaryVote::vote_hash(Round(1), value1, node1.id, VoteType::InitialVote);
+        let vote = PrimaryVote::new(node1.id, vote_hash4, Round(1), value1, VoteType::InitialVote, Some(proof), election_hash);
         assert_eq!(node1.validate_vote(vote), Valid);
     }
 
@@ -468,21 +469,21 @@ mod tests {
         let value1 = Value::One;
         let value2 = Value::One;
         let value3 = Value::Zero;
-        let vote_hash1 = Vote::vote_hash(round, value1, node1.id.clone(), VoteType::InitialVote);
-        let vote_hash2 = Vote::vote_hash(round, value2, node2.id.clone(), VoteType::InitialVote);
-        let vote_hash3 = Vote::vote_hash(round, value3, node3.id.clone(), VoteType::InitialVote);
-        let vote1 = Vote::new(node1.id.clone(), vote_hash1.clone(), round, value1, VoteType::InitialVote, None, election_hash.clone());
+        let vote_hash1 = PrimaryVote::vote_hash(round, value1, node1.id.clone(), VoteType::InitialVote);
+        let vote_hash2 = PrimaryVote::vote_hash(round, value2, node2.id.clone(), VoteType::InitialVote);
+        let vote_hash3 = PrimaryVote::vote_hash(round, value3, node3.id.clone(), VoteType::InitialVote);
+        let vote1 = PrimaryVote::new(node1.id.clone(), vote_hash1.clone(), round, value1, VoteType::InitialVote, None, election_hash.clone());
         node1.insert_vote(vote1.clone());
-        let vote2 = Vote::new(node2.id.clone(), vote_hash2.clone(), round, value2, VoteType::InitialVote, None, election_hash.clone());
+        let vote2 = PrimaryVote::new(node2.id.clone(), vote_hash2.clone(), round, value2, VoteType::InitialVote, None, election_hash.clone());
         node1.insert_vote(vote2.clone());
-        let vote3 = Vote::new(node3.id.clone(), vote_hash3.clone(), round, value3, VoteType::InitialVote, None, election_hash.clone());
+        let vote3 = PrimaryVote::new(node3.id.clone(), vote_hash3.clone(), round, value3, VoteType::InitialVote, None, election_hash.clone());
         node1.insert_vote(vote3.clone());
         let mut proof = BTreeSet::new();
         proof.insert(vote1.vote_hash);
         proof.insert(vote2.vote_hash);
         proof.insert(vote3.vote_hash);
-        let vote_hash4 = Vote::vote_hash(Round(1), value1, node1.id, VoteType::Commit);
-        let vote = Vote::new(node1.id, vote_hash4, Round(1), value1, VoteType::Commit, Some(proof), election_hash);
+        let vote_hash4 = PrimaryVote::vote_hash(Round(1), value1, node1.id, VoteType::Commit);
+        let vote = PrimaryVote::new(node1.id, vote_hash4, Round(1), value1, VoteType::Commit, Some(proof), election_hash);
         println!("vote: {:?}", vote);
         assert_eq!(node1.validate_vote(vote), Invalid);
     }
@@ -506,23 +507,23 @@ mod tests {
         let value5 = Value::Zero;
         let value6 = Value::One;
         let value7 = Value::One;
-        let vote_hash1 = Vote::vote_hash(round, value1, node1.id.clone(), VoteType::InitialVote);
-        let vote_hash2 = Vote::vote_hash(round, value2, node2.id.clone(), VoteType::InitialVote);
-        let vote_hash3 = Vote::vote_hash(round, value3, node3.id.clone(), VoteType::InitialVote);
-        let vote_hash4 = Vote::vote_hash(round, value3, node4.id.clone(), VoteType::InitialVote);
-        let vote_hash5 = Vote::vote_hash(round, value3, node5.id.clone(), VoteType::InitialVote);
-        let vote_hash6 = Vote::vote_hash(round, value3, node6.id.clone(), VoteType::InitialVote);
-        let vote1 = Vote::new(node1.id.clone(), vote_hash1.clone(), round, value1, VoteType::InitialVote, None, election_hash.clone());
+        let vote_hash1 = PrimaryVote::vote_hash(round, value1, node1.id.clone(), VoteType::InitialVote);
+        let vote_hash2 = PrimaryVote::vote_hash(round, value2, node2.id.clone(), VoteType::InitialVote);
+        let vote_hash3 = PrimaryVote::vote_hash(round, value3, node3.id.clone(), VoteType::InitialVote);
+        let vote_hash4 = PrimaryVote::vote_hash(round, value3, node4.id.clone(), VoteType::InitialVote);
+        let vote_hash5 = PrimaryVote::vote_hash(round, value3, node5.id.clone(), VoteType::InitialVote);
+        let vote_hash6 = PrimaryVote::vote_hash(round, value3, node6.id.clone(), VoteType::InitialVote);
+        let vote1 = PrimaryVote::new(node1.id.clone(), vote_hash1.clone(), round, value1, VoteType::InitialVote, None, election_hash.clone());
         node1.insert_vote(vote1.clone());
-        let vote2 = Vote::new(node2.id.clone(), vote_hash2.clone(), round, value2, VoteType::InitialVote, None, election_hash.clone());
+        let vote2 = PrimaryVote::new(node2.id.clone(), vote_hash2.clone(), round, value2, VoteType::InitialVote, None, election_hash.clone());
         node1.insert_vote(vote2.clone());
-        let vote3 = Vote::new(node3.id.clone(), vote_hash3.clone(), round, value3, VoteType::InitialVote, None, election_hash.clone());
+        let vote3 = PrimaryVote::new(node3.id.clone(), vote_hash3.clone(), round, value3, VoteType::InitialVote, None, election_hash.clone());
         node1.insert_vote(vote3.clone());
-        let vote4 = Vote::new(node4.id.clone(), vote_hash4.clone(), round, value4, VoteType::InitialVote, None, election_hash.clone());
+        let vote4 = PrimaryVote::new(node4.id.clone(), vote_hash4.clone(), round, value4, VoteType::InitialVote, None, election_hash.clone());
         node1.insert_vote(vote4.clone());
-        let vote5 = Vote::new(node5.id.clone(), vote_hash5.clone(), round, value5, VoteType::InitialVote, None, election_hash.clone());
+        let vote5 = PrimaryVote::new(node5.id.clone(), vote_hash5.clone(), round, value5, VoteType::InitialVote, None, election_hash.clone());
         node1.insert_vote(vote5.clone());
-        let vote6 = Vote::new(node6.id.clone(), vote_hash6.clone(), round, value6, VoteType::InitialVote, None, election_hash.clone());
+        let vote6 = PrimaryVote::new(node6.id.clone(), vote_hash6.clone(), round, value6, VoteType::InitialVote, None, election_hash.clone());
         node1.insert_vote(vote6.clone());
         let mut proof = BTreeSet::new();
         proof.insert(vote1.vote_hash);
@@ -531,8 +532,8 @@ mod tests {
         proof.insert(vote4.vote_hash);
         proof.insert(vote5.vote_hash);
         proof.insert(vote6.vote_hash);
-        let vote_hash7 = Vote::vote_hash(Round(1), Value::Zero, node1.id, VoteType::Commit);
-        let vote = Vote::new(node1.id, vote_hash7, Round(1), Value::Zero, VoteType::Commit, Some(proof), election_hash);
+        let vote_hash7 = PrimaryVote::vote_hash(Round(1), Value::Zero, node1.id, VoteType::Commit);
+        let vote = PrimaryVote::new(node1.id, vote_hash7, Round(1), Value::Zero, VoteType::Commit, Some(proof), election_hash);
         assert_eq!(node1.validate_vote(vote), Valid);
     }
 
@@ -545,8 +546,8 @@ mod tests {
         let election_hash = ElectionHash::random();
         let round = Round(0);
         let value1 = Value::One;
-        let vote_hash1 = Vote::vote_hash(round, value1, node1.id.clone(), VoteType::InitialVote);
-        let vote1 = Vote::new(node1.id.clone(), vote_hash1.clone(), round, value1, VoteType::Commit, None, election_hash.clone());
+        let vote_hash1 = PrimaryVote::vote_hash(round, value1, node1.id.clone(), VoteType::InitialVote);
+        let vote1 = PrimaryVote::new(node1.id.clone(), vote_hash1.clone(), round, value1, VoteType::Commit, None, election_hash.clone());
         assert_eq!(node2.validate_vote(vote1), Invalid);
     }
 
@@ -561,21 +562,21 @@ mod tests {
         let value1 = Value::One;
         let value2 = Value::One;
         let value3 = Value::Zero;
-        let vote_hash1 = Vote::vote_hash(round, value1, node1.id.clone(), VoteType::InitialVote);
-        let vote_hash2 = Vote::vote_hash(round, value2, node2.id.clone(), VoteType::InitialVote);
-        let vote_hash3 = Vote::vote_hash(round, value3, node3.id.clone(), VoteType::InitialVote);
-        let vote1 = Vote::new(node1.id.clone(), vote_hash1.clone(), round, value1, VoteType::InitialVote, None, election_hash.clone());
+        let vote_hash1 = PrimaryVote::vote_hash(round, value1, node1.id.clone(), VoteType::InitialVote);
+        let vote_hash2 = PrimaryVote::vote_hash(round, value2, node2.id.clone(), VoteType::InitialVote);
+        let vote_hash3 = PrimaryVote::vote_hash(round, value3, node3.id.clone(), VoteType::InitialVote);
+        let vote1 = PrimaryVote::new(node1.id.clone(), vote_hash1.clone(), round, value1, VoteType::InitialVote, None, election_hash.clone());
         node1.insert_vote(vote1.clone());
-        let vote2 = Vote::new(node2.id.clone(), vote_hash2.clone(), round, value2, VoteType::InitialVote, None, election_hash.clone());
+        let vote2 = PrimaryVote::new(node2.id.clone(), vote_hash2.clone(), round, value2, VoteType::InitialVote, None, election_hash.clone());
         node1.insert_vote(vote2.clone());
-        let vote3 = Vote::new(node3.id.clone(), vote_hash3.clone(), round, value3, VoteType::InitialVote, None, election_hash.clone());
+        let vote3 = PrimaryVote::new(node3.id.clone(), vote_hash3.clone(), round, value3, VoteType::InitialVote, None, election_hash.clone());
         //node1.insert_vote(vote3.clone());
         let mut proof = BTreeSet::new();
         proof.insert(vote1.vote_hash);
         proof.insert(vote2.vote_hash);
         proof.insert(vote3.vote_hash.clone());
-        let vote_hash4 = Vote::vote_hash(Round(1), value1, node1.id, VoteType::InitialVote);
-        let vote = Vote::new(node1.id, vote_hash4, Round(1), value1, VoteType::InitialVote, Some(proof), election_hash);
+        let vote_hash4 = PrimaryVote::vote_hash(Round(1), value1, node1.id, VoteType::InitialVote);
+        let vote = PrimaryVote::new(node1.id, vote_hash4, Round(1), value1, VoteType::InitialVote, Some(proof), election_hash);
         println!("vote: {:?}", vote);
         assert_eq!(node1.validate_vote(vote.clone()), Pending);
         node1.insert_vote(vote3.clone());
@@ -597,20 +598,20 @@ mod tests {
         let value3 = Value::Zero;
         let value4 = Value::Zero;
         let value5 = Value::Zero;
-        let vote_hash1 = Vote::vote_hash(round, value1, node1.id.clone(), VoteType::InitialVote);
-        let vote_hash2 = Vote::vote_hash(round, value2, node2.id.clone(), VoteType::InitialVote);
-        let vote_hash3 = Vote::vote_hash(round, value3, node3.id.clone(), VoteType::InitialVote);
-        let vote_hash4 = Vote::vote_hash(round, value3, node4.id.clone(), VoteType::InitialVote);
-        let vote_hash5 = Vote::vote_hash(round, value3, node5.id.clone(), VoteType::InitialVote);
-        let vote1 = Vote::new(node1.id.clone(), vote_hash1.clone(), round, value1, VoteType::InitialVote, None, election_hash.clone());
+        let vote_hash1 = PrimaryVote::vote_hash(round, value1, node1.id.clone(), VoteType::InitialVote);
+        let vote_hash2 = PrimaryVote::vote_hash(round, value2, node2.id.clone(), VoteType::InitialVote);
+        let vote_hash3 = PrimaryVote::vote_hash(round, value3, node3.id.clone(), VoteType::InitialVote);
+        let vote_hash4 = PrimaryVote::vote_hash(round, value3, node4.id.clone(), VoteType::InitialVote);
+        let vote_hash5 = PrimaryVote::vote_hash(round, value3, node5.id.clone(), VoteType::InitialVote);
+        let vote1 = PrimaryVote::new(node1.id.clone(), vote_hash1.clone(), round, value1, VoteType::InitialVote, None, election_hash.clone());
         node1.insert_vote(vote1.clone());
-        let vote2 = Vote::new(node2.id.clone(), vote_hash2.clone(), round, value2, VoteType::InitialVote, None, election_hash.clone());
+        let vote2 = PrimaryVote::new(node2.id.clone(), vote_hash2.clone(), round, value2, VoteType::InitialVote, None, election_hash.clone());
         node1.insert_vote(vote2.clone());
-        let vote3 = Vote::new(node3.id.clone(), vote_hash3.clone(), round, value3, VoteType::InitialVote, None, election_hash.clone());
+        let vote3 = PrimaryVote::new(node3.id.clone(), vote_hash3.clone(), round, value3, VoteType::InitialVote, None, election_hash.clone());
         node1.insert_vote(vote3.clone());
-        let vote4 = Vote::new(node4.id.clone(), vote_hash4.clone(), round, value4, VoteType::InitialVote, None, election_hash.clone());
+        let vote4 = PrimaryVote::new(node4.id.clone(), vote_hash4.clone(), round, value4, VoteType::InitialVote, None, election_hash.clone());
         node1.insert_vote(vote4.clone());
-        let vote5 = Vote::new(node5.id.clone(), vote_hash5.clone(), round, value5, VoteType::InitialVote, None, election_hash.clone());
+        let vote5 = PrimaryVote::new(node5.id.clone(), vote_hash5.clone(), round, value5, VoteType::InitialVote, None, election_hash.clone());
         node1.insert_vote(vote5.clone());
         let mut proof = BTreeSet::new();
         proof.insert(vote1.vote_hash);
@@ -618,17 +619,17 @@ mod tests {
         proof.insert(vote3.vote_hash);
         proof.insert(vote4.vote_hash);
         proof.insert(vote5.vote_hash);
-        let vote_hash7 = Vote::vote_hash(Round(1), Value::Zero, node1.id, VoteType::Commit);
-        let vote7 = Vote::new(node1.id, vote_hash7, Round(1), Value::Zero, VoteType::Commit, Some(proof.clone()), election_hash.clone());
+        let vote_hash7 = PrimaryVote::vote_hash(Round(1), Value::Zero, node1.id, VoteType::Commit);
+        let vote7 = PrimaryVote::new(node1.id, vote_hash7, Round(1), Value::Zero, VoteType::Commit, Some(proof.clone()), election_hash.clone());
         assert_eq!(node1.validate_vote(vote7.clone()), Valid);
-        let vote_hash8 = Vote::vote_hash(Round(1), Value::Zero, node2.id, VoteType::Commit);
-        let vote8 = Vote::new(node2.id, vote_hash8, Round(1), Value::Zero, VoteType::Commit, Some(proof.clone()), election_hash.clone());
-        let vote_hash9 = Vote::vote_hash(Round(1), Value::Zero, node3.id, VoteType::Commit);
-        let vote9 = Vote::new(node3.id, vote_hash9, Round(1), Value::Zero, VoteType::Commit, Some(proof.clone()), election_hash.clone());
-        let vote_hash10 = Vote::vote_hash(Round(1), Value::Zero, node4.id, VoteType::Commit);
-        let vote10 = Vote::new(node4.id, vote_hash10, Round(1), Value::Zero, VoteType::Commit, Some(proof.clone()), election_hash.clone());
-        let vote_hash11 = Vote::vote_hash(Round(1), Value::Zero, node5.id, VoteType::Commit);
-        let vote11 = Vote::new(node5.id, vote_hash11, Round(1), Value::Zero, VoteType::Commit, Some(proof.clone()), election_hash.clone());
+        let vote_hash8 = PrimaryVote::vote_hash(Round(1), Value::Zero, node2.id, VoteType::Commit);
+        let vote8 = PrimaryVote::new(node2.id, vote_hash8, Round(1), Value::Zero, VoteType::Commit, Some(proof.clone()), election_hash.clone());
+        let vote_hash9 = PrimaryVote::vote_hash(Round(1), Value::Zero, node3.id, VoteType::Commit);
+        let vote9 = PrimaryVote::new(node3.id, vote_hash9, Round(1), Value::Zero, VoteType::Commit, Some(proof.clone()), election_hash.clone());
+        let vote_hash10 = PrimaryVote::vote_hash(Round(1), Value::Zero, node4.id, VoteType::Commit);
+        let vote10 = PrimaryVote::new(node4.id, vote_hash10, Round(1), Value::Zero, VoteType::Commit, Some(proof.clone()), election_hash.clone());
+        let vote_hash11 = PrimaryVote::vote_hash(Round(1), Value::Zero, node5.id, VoteType::Commit);
+        let vote11 = PrimaryVote::new(node5.id, vote_hash11, Round(1), Value::Zero, VoteType::Commit, Some(proof.clone()), election_hash.clone());
         //assert_eq!(node1.validate_vote(vote8.clone()), true);
         //assert_eq!(node1.validate_vote(vote9.clone()), true);
         //assert_eq!(node1.validate_vote(vote10.clone()), true);
@@ -645,8 +646,8 @@ mod tests {
         new_proof.insert(vote9.vote_hash);
         new_proof.insert(vote10.vote_hash);
         new_proof.insert(vote11.vote_hash);
-        let vote_hash12 = Vote::vote_hash(Round(1), Value::Zero, node1.id, VoteType::Commit);
-        let vote12 = Vote::new(node1.id, vote_hash12, Round(2), Value::Zero, VoteType::Decide, Some(new_proof.clone()), election_hash.clone());
+        let vote_hash12 = PrimaryVote::vote_hash(Round(1), Value::Zero, node1.id, VoteType::Commit);
+        let vote12 = PrimaryVote::new(node1.id, vote_hash12, Round(2), Value::Zero, VoteType::Decide, Some(new_proof.clone()), election_hash.clone());
         //println!("vote: {:?}", node1);
         assert_eq!(node1.validate_vote(vote12), Valid);
     }

@@ -1,14 +1,15 @@
-use crate::vote::Vote;
+use crate::vote::PrimaryVote;
+use serde::{Serialize, Deserialize};
 
-pub(crate) const NUMBER_OF_BYZANTINE_NODES: usize = 2;
-pub(crate) const NUMBER_OF_TOTAL_NODES: usize = 3 * NUMBER_OF_BYZANTINE_NODES + 1;
-pub(crate) const QUORUM: usize = 2 * NUMBER_OF_BYZANTINE_NODES + 1;
-pub(crate) const SEMI_QUORUM: usize = NUMBER_OF_BYZANTINE_NODES + 1;
-pub(crate) const NUMBER_OF_TXS: usize = 1;
-pub(crate) const TIMEOUT: usize = 1;
+pub const NUMBER_OF_BYZANTINE_NODES: usize = 2;
+pub const NUMBER_OF_TOTAL_NODES: usize = 3 * NUMBER_OF_BYZANTINE_NODES + 1;
+pub const QUORUM: usize = 2 * NUMBER_OF_BYZANTINE_NODES + 1;
+pub const SEMI_QUORUM: usize = NUMBER_OF_BYZANTINE_NODES + 1;
+pub const NUMBER_OF_TXS: usize = 1;
+pub const TIMEOUT: usize = 1;
 
-#[derive(Eq, PartialEq, Clone, Ord, PartialOrd, Hash)]
-pub(crate) struct Hash(pub(crate) Vec<u8>);
+#[derive(Eq, PartialEq, Clone, Ord, PartialOrd, Hash, Serialize, Deserialize)]
+pub struct Hash(pub Vec<u8>);
 
 impl Hash {
     fn to_string(&self) -> String {
@@ -28,8 +29,8 @@ impl ::std::fmt::Debug for Hash {
     }
 }
 
-#[derive(Debug, Clone, Ord, PartialOrd, Eq, PartialEq)]
-pub(crate) enum Message {
-    SendVote(Vote, bool, u64),
-    TimerExpired(Vote),
+#[derive(Debug, Clone, Ord, PartialOrd, Eq, PartialEq, Serialize, Deserialize)]
+pub enum PrimaryMessage {
+    SendVote(PrimaryVote),
+    TimerExpired(PrimaryVote),
 }

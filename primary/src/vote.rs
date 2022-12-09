@@ -8,31 +8,32 @@ use crate::general::Hash;
 use crate::node::NodeId;
 use crate::vote::Value::{One, Zero};
 use crate::vote::VoteType::{Commit, InitialVote};
+use serde::{Serialize, Deserialize};
 
-#[derive(Eq, PartialEq, Clone, Ord, PartialOrd, Hash, Debug)]
-pub(crate) struct VoteHash(pub(crate) Hash);
+#[derive(Eq, PartialEq, Clone, Ord, PartialOrd, Hash, Debug, Serialize, Deserialize)]
+pub struct VoteHash(pub Hash);
 
-#[derive(Debug, Clone, Ord, PartialOrd, Eq, PartialEq, Hash)]
-pub(crate) enum VoteType {
+#[derive(Debug, Clone, Ord, PartialOrd, Eq, PartialEq, Hash, Serialize, Deserialize)]
+pub enum VoteType {
     InitialVote,
     Commit,
     Decide,
 }
 
 #[derive(Clone, Debug)]
-pub(crate) struct Decision {
-    pub(crate) value: Value,
-    pub(crate) vote_type: VoteType,
+pub struct Decision {
+    pub value: Value,
+    pub vote_type: VoteType,
 }
 
 impl Decision {
-    pub(crate) fn new(value: Value, vote_type: VoteType) -> Self {
+    pub fn new(value: Value, vote_type: VoteType) -> Self {
         Decision {
             value, vote_type
         }
     }
 
-    pub(crate) fn random() -> Self {
+    pub fn random() -> Self {
         let mut rng = thread_rng();
         let mut value = Zero;
         let mut vote_type = InitialVote;
@@ -48,29 +49,25 @@ impl Decision {
     }
 }
 
-#[derive(Debug, Clone, Ord, PartialOrd, Eq, PartialEq, Hash)]
-pub(crate) struct Vote {
-    //pub(crate) origin: NodeId,
-    pub(crate) signer: NodeId,
-    pub(crate) vote_hash: VoteHash,
-    pub(crate) round: Round,
-    pub(crate) value: Value,
-    //pub(crate) voted_value: Value,
-    //pub(crate) committed_value: Value,
-    //pub(crate) decided_value: Value,
-    pub(crate) vote_type: VoteType,
-    pub(crate) proof: Option<BTreeSet<VoteHash>>,
-    pub(crate) election_hash: ElectionHash,
+#[derive(Debug, Clone, Ord, PartialOrd, Eq, PartialEq, Hash, Serialize, Deserialize)]
+pub struct PrimaryVote {
+    pub signer: NodeId,
+    pub vote_hash: VoteHash,
+    pub round: Round,
+    pub value: Value,
+    pub vote_type: VoteType,
+    pub proof: Option<BTreeSet<VoteHash>>,
+    pub election_hash: ElectionHash,
 }
 
-#[derive(Debug, Clone, Ord, PartialOrd, Eq, PartialEq, Copy, Hash)]
-pub(crate) enum Value {
+#[derive(Debug, Clone, Ord, PartialOrd, Eq, PartialEq, Copy, Hash, Serialize, Deserialize)]
+pub enum Value {
     Zero,
     One,
 }
 
-impl Vote {
-    pub(crate) fn random(signer: NodeId, election_hash: ElectionHash) -> Self {
+impl PrimaryVote {
+    pub fn random(signer: NodeId, election_hash: ElectionHash) -> Self {
         let round = Round(0);
         let mut rng = thread_rng();
         let mut value = Zero;
@@ -80,7 +77,7 @@ impl Vote {
         Self {
             //origin: (),
             signer,
-            vote_hash: Vote::vote_hash(round, value, signer, VoteType::InitialVote),
+            vote_hash: PrimaryVote::vote_hash(round, value, signer, VoteType::InitialVote),
             round,
             value,
             //voted_value: Value::Zero,
@@ -92,11 +89,11 @@ impl Vote {
         }
     }
 
-    pub(crate) fn new(signer: NodeId, vote_hash: VoteHash, round: Round, value: Value, vote_type: VoteType, proof: Option<BTreeSet<VoteHash>>, election_hash: ElectionHash) -> Self {
+    pub fn new(signer: NodeId, vote_hash: VoteHash, round: Round, value: Value, vote_type: VoteType, proof: Option<BTreeSet<VoteHash>>, election_hash: ElectionHash) -> Self {
         Self { signer, vote_hash, round, value, vote_type, proof, election_hash }
     }
 
-    pub(crate) fn vote_hash(round: Round, value: Value, id: NodeId, vote_type: VoteType) -> VoteHash {
+    pub fn vote_hash(round: Round, value: Value, id: NodeId, vote_type: VoteType) -> VoteHash {
         let mut buf = vec![];
         buf.write_u32::<LittleEndian>(round.0).unwrap();
         buf.write_u64::<LittleEndian>(id.0).unwrap();
@@ -116,7 +113,7 @@ impl Vote {
 }
 
 #[derive(PartialEq, Debug, Clone)]
-pub(crate) enum ValidationStatus {
+pub enum ValidationStatus {
     Valid,
     Invalid,
     Pending,

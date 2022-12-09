@@ -183,6 +183,6 @@ impl fmt::Debug for PrimaryVote {
 #[derive(Debug, Serialize, Deserialize)]
 pub enum PrimaryMessage {
     Vote(PrimaryVote),
-    Transactions(Vec<Transaction>),
-    Decision((BlockHash, PublicKey, usize))
+    //Transactions(Vec<Transaction>),
+    //Decision((BlockHash, PublicKey, usize))
 }
