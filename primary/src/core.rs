@@ -347,7 +347,7 @@ impl Core {
                     }
                     round_state.tally_vote(vote.clone());
                     round_state.validated_votes.insert(VoteHash(vote.digest()), vote.clone());
-                    //round_state = self.validate_pending_votes(vote.clone(), round_state.clone());
+                    round_state = self.validate_pending_votes(vote.clone(), round_state.clone()).await;
                     if !round_state.voted && vote.round.0 == 0 {
                         let mut own_vote = PrimaryVote::random(self.id, vote.election_hash.clone()).await;
                         //own_vote.vote_hash = PrimaryVote::vote_hash(Round(0), own_vote.value.clone(), self.id, own_vote.vote_type.clone()).await;
@@ -400,6 +400,27 @@ impl Core {
         }
         self.elections.insert(vote.election_hash.clone(), election.clone());
         info!("State of election of node {:?}: {:?}", self.id, election);
+    }
+
+    pub async fn validate_pending_votes(&mut self, vote: PrimaryVote, mut round_state: RoundState) -> RoundState {
+        let mut new_unvalidated_votes = round_state.unvalidated_votes.clone();
+        for (v, vs) in new_unvalidated_votes {
+            if vs.contains(&VoteHash(vote.digest())) {
+                let mut hp = round_state.unvalidated_votes.get(&v).unwrap().clone();
+                hp.remove(&VoteHash(vote.digest()));
+                if hp.is_empty() {
+                    if self.validate_vote(v.clone()).await == Valid {
+                        let mut election = self.elections.get(&v.election_hash).unwrap().clone();
+                        let mut rs = election.state.get(&v.round).unwrap().clone();
+                        rs.validated_votes.insert(VoteHash(v.digest()), v.clone());
+                        election.state.insert(v.round, rs);
+                        self.elections.insert(v.election_hash.clone(), election);
+                    }
+                }
+                round_state.unvalidated_votes.insert(v.clone(), hp.clone());
+            }
+        }
+        round_state
     }
 
     async fn validate_vote(&mut self, vote: PrimaryVote) -> ValidationStatus {

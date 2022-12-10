@@ -2,7 +2,7 @@ use crate::vote::PrimaryVote;
 use serde::{Serialize, Deserialize};
 use crate::Transaction;
 
-pub const NUMBER_OF_BYZANTINE_NODES: usize = 2;
+pub const NUMBER_OF_BYZANTINE_NODES: usize = 1;
 pub const NUMBER_OF_TOTAL_NODES: usize = 3 * NUMBER_OF_BYZANTINE_NODES + 1;
 pub const QUORUM: usize = 2 * NUMBER_OF_BYZANTINE_NODES + 1;
 pub const SEMI_QUORUM: usize = NUMBER_OF_BYZANTINE_NODES + 1;
