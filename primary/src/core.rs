@@ -282,6 +282,7 @@ impl Core {
         let (public_keys, mut addresses): (Vec<PublicKey>, Vec<SocketAddr>) = self.primary_addresses.iter().cloned().unzip();
         info!("{:?} received {:?}", self.id, tx);
         let mut election = Election::new(tx.digest());
+        info!("Created {:?}", tx.digest().0);
         let mut round_state = RoundState::new(tx.digest());
         // only if vote is valid
         if let Some(e) = self.elections.get(&tx.digest()) {
@@ -377,6 +378,7 @@ impl Core {
                         self.broadcast_message(PrimaryMessage::SendVote(next_round_vote.clone()), addresses.clone(), next_round_vote.round).await;
                         if next_round_vote.vote_type == Decide {
                             info!("{:?} decided {:?} in {:?} of {:?}", self.id, next_round_vote.value, next_round_vote.round, next_round_vote.election_hash);
+                            info!("Committed {:?} -> {:?}", next_round_vote.value, next_round_vote.election_hash.0);
                             election.is_decided = true;
                             self.decided.insert(next_round_vote.election_hash.clone(), next_round_vote.value.clone());
                         }

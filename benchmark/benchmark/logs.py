@@ -45,35 +45,9 @@ class LogParser:
                 results = p.map(self._parse_primaries, primaries)
         except (ValueError, IndexError, AttributeError) as e:
             raise ParseError(f'Failed to parse nodes\' logs: {e}')
-        proposals, commits, sizes = zip(*results)
-
-        #print("results: ", results)
-
-        p = len(primaries)
-
-        l = numpy.array_split(commits, p)
-
-        #print("l1: ", l[0][0])
-        #print("l2: ", l[1][0])
-
-        for i in range(1, p):
-            assert sorted(l[0][0]) == sorted(l[i][0])
-
-        self.commits = self._merge_results([x.items() for x in commits])
-
-        #print("self commits: ", self.commits)
-
-        #print("sizes2: ", sizes)
-
+        proposals, commits = zip(*results)
         self.proposals = self._merge_results([x.items() for x in proposals])
-
-        #print("self proposals: ", self.proposals)
-
-        self.sizes = {
-            k: v for x in sizes for k, v in x.items() if k in self.commits
-        }
-
-        #print("self sizes: ", self.sizes)
+        self.commits = self._merge_results([x.items() for x in commits])
 
         # Check whether clients missed their target rate.
         if self.misses != 0:
@@ -117,22 +91,16 @@ class LogParser:
         if search(r'(?:panicked|Error)', log) is not None:
             raise ParseError('Primary(s) panicked')
 
-        tmp = findall(r'\[(.*Z) .* Received ([^ ]+\=)', log)
+        tmp = findall(r'\[(.*Z) .* Created ([^ ]+=)', log)
         tmp = [(d, self._to_posix(t)) for t, d in tmp]
         proposals = self._merge_results([tmp])
-        #print("proposals: ", proposals)
 
-        tmp1 = findall(r'\[(.*Z) .* Committed ParentHash\([^ ]+\) -> ([^ ]+=)', log)
-        tmp1 = [(d, self._to_posix(t)) for t, d in tmp1]
-        commits = self._merge_results([tmp1])
-        #print("commits: ", commits)
+        tmp = findall(r'\[(.*Z) .* Committed ([^ ]+) -> ([^ ]+=)', log)
+        print(tmp)
+        tmp = [(d, self._to_posix(t)) for t, d in tmp]
+        commits = self._merge_results([tmp])
 
-        tmp2 = findall(r'Batch ([^ ]+) contains (\d+) B', log)
-        sizes = {d: int(s) for d, s in tmp2}
-
-        #print("sizes: ", sizes)
-
-        return proposals, commits, sizes
+        return proposals, commits
 
     def _to_posix(self, string):
         x = datetime.fromisoformat(string.replace('Z', '+00:00'))
@@ -143,12 +111,11 @@ class LogParser:
             return 0, 0, 0
         start, end = min(self.proposals.values()), max(self.commits.values())
         duration = end - start
-        bytes = sum(self.sizes.values())
+        #bytes = sum(self.sizes.values())
+        # total bytes of all txs
+        bytes = 512 * 1
         bps = bytes / duration
         tps = bps / self.size[0]
-        #print("duration: ", duration)
-        #print("bytes: ", bytes)
-        #print("size: ", self.size[0])
         return tps, bps, duration
 
     def _consensus_latency(self):
