@@ -17,7 +17,7 @@ class ParseError(Exception):
     pass
 
 class LogParser:
-    def __init__(self, clients, primaries, faults=0):
+    def __init__(self, clients, primaries, faults=1):
         inputs = [clients, primaries]
         assert all(isinstance(x, list) for x in inputs)
         assert all(isinstance(x, str) for y in inputs for x in y)
@@ -45,9 +45,29 @@ class LogParser:
                 results = p.map(self._parse_primaries, primaries)
         except (ValueError, IndexError, AttributeError) as e:
             raise ParseError(f'Failed to parse nodes\' logs: {e}')
-        proposals, commits = zip(*results)
+        proposals, commits, decisions = zip(*results)
         self.proposals = self._merge_results([x.items() for x in proposals])
         self.commits = self._merge_results([x.items() for x in commits])
+
+        print(decisions)
+
+        p = len(primaries)
+
+        l = numpy.array_split(decisions, p)
+
+        print(l)
+
+        print(p)
+
+        #print("l1: ", l[0][0])
+        #print("l2: ", l[1][0])
+
+        print(sorted(l[0][0]))
+
+        for i in range(1, p):
+            if sorted(l[0][0]) and sorted(l[i][0]):
+                print(sorted(l[i][0]))
+                assert sorted(l[0][0]) == sorted(l[i][0])
 
         # Check whether clients missed their target rate.
         if self.misses != 0:
@@ -96,11 +116,13 @@ class LogParser:
         proposals = self._merge_results([tmp])
 
         tmp = findall(r'\[(.*Z) .* Committed ([^ ]+) -> ([^ ]+=)', log)
-        print(tmp)
-        tmp = [(d, self._to_posix(t)) for t, d in tmp]
+        #print(tmp)
+        decisions = [(d, a) for t, a, d in tmp]
+        #print(decisions)
+        tmp = [(d, self._to_posix(t)) for t, a, d in tmp]
         commits = self._merge_results([tmp])
 
-        return proposals, commits
+        return proposals, commits, decisions
 
     def _to_posix(self, string):
         x = datetime.fromisoformat(string.replace('Z', '+00:00'))
