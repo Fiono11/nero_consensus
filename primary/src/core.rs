@@ -22,7 +22,7 @@ use std::string::String;
 use std::sync::Arc;
 use crate::election::{Election, ElectionHash, Round, RoundState, Tally};
 use crate::general::{PrimaryMessage, QUORUM, SEMI_QUORUM};
-use crate::{BlockHash, Transaction, VoteHash};
+use crate::{BlockHash, Transaction, VoteHash, VoteType};
 use crate::vote::{Decision, PrimaryVote, ValidationStatus, Value};
 use crate::vote::ValidationStatus::{Invalid, Pending, Valid};
 use crate::vote::Value::{One, Zero};
@@ -366,7 +366,7 @@ impl Core {
                         next_round_state = rs.clone();
                     }
                     if round_state.validated_votes.len() >= QUORUM && !next_round_state.voted {//&& round_state.timed_out {
-                        let decision = self.decide_vote(round_state.tally.clone()).await;
+                        let decision = self.make_decision(round_state.tally.clone()).await;
                         //let vote_hash = PrimaryVote::vote_hash(next_round, decision.value.clone(), self.id, decision.vote_type.clone()).await;
                         let proof = Some(round_state.validated_votes.iter().map(|(hash, vote)| hash.clone()).collect());
                         let next_round_vote = PrimaryVote::new(self.id, next_round, decision.value.clone(), decision.vote_type.clone(), proof, vote.election_hash.clone());
@@ -446,7 +446,7 @@ impl Core {
                         proof_tally.insert(rs.validated_votes.get(&vote).unwrap().clone());
                     }
                     //let p = Tally::from_votes(proof_tally.clone());
-                    let decision = self.decide_vote(tally.clone()).await;
+                    let decision = self.make_decision(tally.clone()).await;
                     if decision.vote_type == vote.vote_type && decision.value == vote.value {
                         return Valid;
                     }
@@ -468,7 +468,7 @@ impl Core {
         Invalid
     }
 
-    pub async fn decide_vote(&mut self, tally: Tally) -> Decision {
+    pub async fn make_decision(&mut self, tally: Tally) -> Decision {
         let mut decision = Decision::new(Zero, InitialVote);
         if self.byzantine {
             return Decision::random();
@@ -492,18 +492,23 @@ impl Core {
             decision.value = One;
             decision.vote_type = Decide;
         }
-        else if tally.zero_votes + tally.zero_commits >= QUORUM as u64 || tally.zero_commits >= SEMI_QUORUM as u64 {
+        else if tally.zero_votes >= QUORUM as u64 || tally.zero_commits > 0 as u64 {
             decision.vote_type = Commit;
         }
-        else if tally.one_votes + tally.one_commits >= QUORUM as u64 || tally.one_commits >= SEMI_QUORUM as u64 {
+        else if tally.one_votes >= QUORUM as u64 || tally.one_commits > 0 as u64 {
             decision.value = One;
             decision.vote_type = Commit;
         }
-        else if tally.zero_votes + tally.zero_commits >= SEMI_QUORUM as u64 {
-            decision.vote_type = Commit;
+        else if tally.zero_votes >= SEMI_QUORUM as u64 {
+            decision.vote_type = VoteType::InitialVote;
+            decision.value = Zero;
+        }
+        else if tally.zero_votes < SEMI_QUORUM as u64 && tally.one_votes < QUORUM as u64 && tally.zero_commits == 0 && tally.one_commits == 0 {
+            decision.value = One;
+            decision.vote_type = VoteType::InitialVote;
         }
         else {
-            decision.value = One;
+            info!("Should not be reached!");
         }
         decision
     }
@@ -519,6 +524,7 @@ impl Core {
                 Some(vote) = self.rx_votes.recv() => self.handle_vote(&vote).await,
 
                 Some(transactions) = self.rx_transaction.recv() => {
+                    info!("Received transactions {:?}", transactions);
                     for transaction in transactions {
                         self.handle_transaction(&transaction).await;
                     }

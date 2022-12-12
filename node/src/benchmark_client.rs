@@ -103,7 +103,6 @@ impl Client {
 
         // Submit all transactions.
         let burst = self.rate / PRECISION;
-        let mut tx = Transaction::new();
         let mut txs = vec![];
         let mut payload = BytesMut::with_capacity(self.size);
         //let mut r = rand::thread_rng().gen();
@@ -120,6 +119,7 @@ impl Client {
             let present = Instant::now();
 
             for x in 0..self.rate {
+                let mut tx = Transaction::new();
                 /*if x == counter % burst {
                     // NOTE: This log entry is used to compute performance.
                     info!("Sending sample transaction {}", counter);
@@ -128,30 +128,32 @@ impl Client {
                     payload.put_u64(counter); // This counter identifies the tx.
                 } else {*/
                 //r += 1;
-                payload.put_u8(1u8); // Standard txs start with 1.
+                //payload.put_u8(1u8); // Standard txs start with 1.
                 //payload.put_u64(r); // Ensures all clients send different txs.
                 //};
 
-                payload.resize(self.size, 0u8);
-                let bytes = payload.split().freeze();
+                //payload.resize(self.size, 0u8);
+                //let bytes = payload.split().freeze();
                 //let mut p = [0; 32];
                 //p.copy_from_slice(&bytes.to_vec()[..]);
-                tx.payload = Payload(bytes.to_vec());
-                tx.timestamp = now();
-                tx.parent = ParentHash(Digest::default());
+                //tx.payload = Payload(bytes.to_vec());
+                //tx.timestamp = now();
+                //tx.parent = ParentHash(Digest::default());
                 txs.push(tx.clone());
-                let transaction = bincode::serialize(&PrimaryMessage::Transactions(txs.clone())).unwrap();
-                //let vote = bincode::serialize(&PrimaryMessage::SendVote(PrimaryVote::random(PublicKey::default(), ElectionHash::random()))).unwrap();
-
-                if let Err(e) = transport.send(Bytes::from(transaction)).await {
-                    warn!("Failed to send transaction: {}", e);
-                    //break 'main;
-                    break;
-                }
-
-                info!("Sent txs: {:?}", txs);
             }
-            if present.elapsed().as_millis() > BURST_DURATION as u128 {
+
+        let transaction = bincode::serialize(&PrimaryMessage::Transactions(txs.clone())).unwrap();
+        //let vote = bincode::serialize(&PrimaryMessage::SendVote(PrimaryVote::random(PublicKey::default(), ElectionHash::random()))).unwrap();
+
+        if let Err(e) = transport.send(Bytes::from(transaction)).await {
+            warn!("Failed to send transaction: {}", e);
+            //break 'main;
+            //break;
+        }
+
+        info!("Sent {:?} txs: {:?}", txs.len(), txs);
+
+        if present.elapsed().as_millis() > BURST_DURATION as u128 {
                 // NOTE: This log entry is used to compute performance.
                 warn!("Transaction rate too high for this client");
             }

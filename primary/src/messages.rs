@@ -3,6 +3,7 @@ use std::convert::{TryFrom, TryInto};
 use std::fmt;
 use std::fmt::Write;
 use ed25519_dalek::{Digest as _, Sha512};
+use ring::digest::digest;
 use config::Committee;
 use crypto::{Digest, Hash, PublicKey, Signature, SignatureService};
 use serde::{Deserialize, Serialize};
@@ -32,15 +33,16 @@ pub type Batch = Vec<Transaction>;
 #[derive(Debug, Hash, PartialEq, Default, Eq, Clone, Deserialize, Serialize, Ord, PartialOrd)]
 pub struct Payload(pub Vec<u8>);
 
-#[derive(Clone, Serialize, Deserialize, Ord, PartialOrd, Eq, PartialEq)]
+#[derive(Clone, Serialize, Deserialize, Ord, PartialOrd, Eq, PartialEq, Debug)]
 pub struct Transaction {
-    pub timestamp: u64,
-    pub payload: Payload,
-    pub parent: ParentHash,
-    pub votes: BTreeSet<PrimaryVote>,
+    //pub timestamp: u64,
+    //pub payload: Payload,
+    //pub parent: ParentHash,
+    //pub votes: BTreeSet<PrimaryVote>,
+    pub digest: Digest,
 }
 
-impl fmt::Debug for Transaction {
+/*impl fmt::Debug for Transaction {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "Tx {:?}: ", self.digest().0);
         f.debug_tuple("")
@@ -50,19 +52,20 @@ impl fmt::Debug for Transaction {
             .field(&self.votes)
             .finish()
     }
-}
+}*/
 
 impl Transaction {
     pub fn new() -> Self {
         Self {
-            timestamp: 0,
-            payload: Payload(vec![]),
-            parent: ParentHash(Digest::default()),
-            votes: BTreeSet::new(),
+            //timestamp: 0,
+            //payload: Payload(vec![]),
+            //parent: ParentHash(Digest::default()),
+            //votes: BTreeSet::new(),
+            digest: Digest::random(),
         }
     }
 
-    pub fn payload(&self) -> Payload {
+    /*pub fn payload(&self) -> Payload {
         self.payload.clone()
     }
 
@@ -76,15 +79,15 @@ impl Transaction {
 
     pub fn timestamp(&self) -> u64{
         self.timestamp
-    }
+    }*/
 
     pub fn digest(&self) -> BlockHash {
-        let digest = Digest(
+        /*let digest = Digest(
             Sha512::digest(&self.payload.0[..]).as_slice()[..32]
                 .try_into()
                 .unwrap(),
-        );
-        BlockHash(digest)
+        );*/
+        BlockHash(self.digest.clone())
     }
 }
 

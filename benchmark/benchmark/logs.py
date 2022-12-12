@@ -17,6 +17,8 @@ class ParseError(Exception):
     pass
 
 class LogParser:
+    txs = 40
+
     def __init__(self, clients, primaries, faults=1):
         inputs = [clients, primaries]
         assert all(isinstance(x, list) for x in inputs)
@@ -64,10 +66,20 @@ class LogParser:
 
         print(sorted(l[0][0]))
 
+        print("SIZE: ", len(sorted(l[0][0])))
+
+        assert len(sorted(l[0][0])) == self.txs # number of txs
+
+        empty = list();
+
         for i in range(1, p):
-            if sorted(l[0][0]) and sorted(l[i][0]):
+            if sorted(l[i][0]):
                 print(sorted(l[i][0]))
-                assert sorted(l[0][0]) == sorted(l[i][0])
+                #assert sorted(l[0][0]) == sorted(l[i][0])
+                assert set(l[0][0]) == set(l[i][0])
+            else:
+                empty.append(l[i][0])
+        assert len(empty) == 1
 
         # Check whether clients missed their target rate.
         if self.misses != 0:
@@ -135,7 +147,7 @@ class LogParser:
         duration = end - start
         #bytes = sum(self.sizes.values())
         # total bytes of all txs
-        bytes = 512 * 1
+        bytes = 512 * self.txs
         bps = bytes / duration
         tps = bps / self.size[0]
         return tps, bps, duration
