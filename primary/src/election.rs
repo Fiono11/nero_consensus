@@ -1,6 +1,7 @@
 use std::collections::{BTreeSet, HashMap};
 use std::process::id;
 use byteorder::{LittleEndian, WriteBytesExt};
+use log::info;
 use rand::{Rng, thread_rng};
 use ring::digest;
 use crate::general::QUORUM;
@@ -91,6 +92,13 @@ impl RoundState {
         else if vote.vote_type == VoteType::Commit && vote.value == One {
             self.tally.one_commits += 1;
         }
+        else if vote.vote_type == VoteType::Decide && vote.value == One {
+            self.tally.one_decides += 1;
+        }
+        else if vote.vote_type == VoteType::Decide && vote.value == One {
+            self.tally.zero_decides += 1;
+        }
+        info!("Tally: {:?}", self.tally);
     }
 }
 

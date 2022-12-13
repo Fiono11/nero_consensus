@@ -17,7 +17,7 @@ class ParseError(Exception):
     pass
 
 class LogParser:
-    txs = 40
+    txs = 20
 
     def __init__(self, clients, primaries, faults=1):
         inputs = [clients, primaries]

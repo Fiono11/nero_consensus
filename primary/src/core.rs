@@ -171,7 +171,7 @@ impl Core {
         //if !addresses.is_empty() {
             let delay = rand::thread_rng().gen_range(0..1000) as u64;
             //sleep(Duration::from_millis(delay)).await;
-            info!("Message {:?} sent to {:?} with a delay of {:?} ms", message, addresses, delay);
+            //info!("Message {:?} sent to {:?} with a delay of {:?} ms", message, addresses, delay);
             let handlers = self.network.broadcast(addresses, bytes.clone()).await;
         //}
         self.cancel_handlers
@@ -280,7 +280,7 @@ impl Core {
 
     pub async fn handle_transaction(&mut self, tx: &Transaction) {
         let (public_keys, mut addresses): (Vec<PublicKey>, Vec<SocketAddr>) = self.primary_addresses.iter().cloned().unzip();
-        info!("{:?} received {:?}", self.id, tx);
+        //info!("{:?} received {:?}", self.id, tx);
         let mut election = Election::new(tx.digest());
         info!("Created {:?}", tx.digest().0);
         let mut round_state = RoundState::new(tx.digest());
@@ -296,9 +296,9 @@ impl Core {
         }
         if !round_state.voted {
             let mut own_vote = PrimaryVote::random(self.id, tx.digest()).await;
-            info!("vote: {:?}", own_vote);
+            //info!("vote: {:?}", own_vote);
             //own_vote.vote_hash = PrimaryVote::vote_hash(Round(0), own_vote.value.clone(), self.id, own_vote.vote_type.clone()).await;
-            info!("hash: {:?}", own_vote.digest());
+            //info!("hash: {:?}", own_vote.digest());
             round_state.validated_votes.insert(VoteHash(own_vote.digest()), own_vote.clone());
             round_state.tally_vote(own_vote.clone());
             self.broadcast_message(PrimaryMessage::SendVote(own_vote.clone()), addresses.clone(), own_vote.round).await;
@@ -310,7 +310,7 @@ impl Core {
         }
         election.state.insert(Round(0), round_state.clone());
         self.elections.insert(tx.digest(), election.clone());
-        info!("State of election of node {:?}: {:?}", self.id, election);
+        //info!("State of election of node {:?}: {:?}", self.id, election);
     }
 
     pub async fn handle_vote(&mut self, vote: &PrimaryVote) {
@@ -342,7 +342,7 @@ impl Core {
         if !round_state.validated_votes.contains_key(&VoteHash(vote.digest())) {
             match self.validate_vote(vote.clone()).await {
                 Valid => {
-                    info!("{:?} is valid!", vote.clone());
+                    //info!("{:?} is valid!", vote.clone());
                     if vote.signer == self.id {
                         round_state.voted = true;
                     }
@@ -376,32 +376,32 @@ impl Core {
                         //Self::set_timeout(self.id, self.sender.clone(), next_round_vote.clone());
                         //self.send_vote(next_round_vote.clone(), destination);
                         self.broadcast_message(PrimaryMessage::SendVote(next_round_vote.clone()), addresses.clone(), next_round_vote.round).await;
-                        if next_round_vote.vote_type == Decide {
-                            info!("{:?} decided {:?} in {:?} of {:?}", self.id, next_round_vote.value, next_round_vote.round, next_round_vote.election_hash);
+                        if next_round_vote.vote_type == Decide && !election.is_decided {
+                            //info!("{:?} decided {:?} in {:?} of {:?}", self.id, next_round_vote.value, next_round_vote.round, next_round_vote.election_hash);
                             info!("Committed {:?} -> {:?}", next_round_vote.value, next_round_vote.election_hash.0);
                             election.is_decided = true;
                             self.decided.insert(next_round_vote.election_hash.clone(), next_round_vote.value.clone());
                         }
-                        if !election.is_decided {
+                        //if !election.is_decided {
                             election.state.insert(next_round, next_round_state.clone());
-                        }
-                        else {
-                            self.elections.remove(&election.hash);
-                        }
+                        //}
+                        //else {
+                            //self.elections.remove(&election.hash);
+                        //}
                     }
                 },
                 Invalid => {
-                    info!("{:?} is invalid!", vote.clone());
+                    //info!("{:?} is invalid!", vote.clone());
                     return;
                 },
                 Pending => {
-                    info!("{:?} is pending!", vote.clone());
+                    //info!("{:?} is pending!", vote.clone());
                     round_state.unvalidated_votes.insert(vote.clone(), vote.proof.as_ref().unwrap().clone());
                 }
             }
         }
         self.elections.insert(vote.election_hash.clone(), election.clone());
-        info!("State of election of node {:?}: {:?}", self.id, election);
+        //info!("State of election of node {:?}: {:?}", self.id, election);
     }
 
     pub async fn validate_pending_votes(&mut self, vote: PrimaryVote, mut round_state: RoundState) -> RoundState {
@@ -451,7 +451,7 @@ impl Core {
                         return Valid;
                     }
                     else {
-                        info!("Vote has proof but the decision is wrong!");
+                        //info!("Vote has proof but the decision is wrong!");
                         return Invalid;
                     }
                 }
@@ -470,7 +470,7 @@ impl Core {
 
     pub async fn make_decision(&mut self, tally: Tally) -> Decision {
         let mut decision = Decision::new(Zero, InitialVote);
-        if self.byzantine {
+        if self.byzantine && tally.one_decides == 0 && tally.one_decides == 0 {
             return Decision::random();
         }
         if tally.zero_commits >= SEMI_QUORUM as u64 && tally.one_commits >= SEMI_QUORUM as u64 {
@@ -740,7 +740,7 @@ impl Core {
                 //}
             };
 
-            // Give the change to schedule other tasks.
+            // Give the chance to schedule other tasks.
             tokio::task::yield_now().await;
         }
     }

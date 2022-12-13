@@ -75,8 +75,8 @@ impl Import for Parameters {}
 
 impl Parameters {
     pub fn log(&self) {
-        info!("Batch size set to {} B", self.batch_size);
-        info!("Max batch delay set to {} ms", self.max_batch_delay);
+        //info!("Batch size set to {} B", self.batch_size);
+        //info!("Max batch delay set to {} ms", self.max_batch_delay);
     }
 }
 
