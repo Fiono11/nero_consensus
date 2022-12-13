@@ -17,7 +17,7 @@ class ParseError(Exception):
     pass
 
 class LogParser:
-    txs = 20
+    txs = 1
 
     def __init__(self, clients, primaries, faults=1):
         inputs = [clients, primaries]
@@ -127,7 +127,7 @@ class LogParser:
         tmp = [(d, self._to_posix(t)) for t, d in tmp]
         proposals = self._merge_results([tmp])
 
-        tmp = findall(r'\[(.*Z) .* Committed ([^ ]+) -> ([^ ]+=)', log)
+        tmp = findall(r'\[(.*Z) .* Decided ([^ ]+) -> ([^ ]+=)', log)
         #print(tmp)
         decisions = [(d, a) for t, a, d in tmp]
         #print(decisions)

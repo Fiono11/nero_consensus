@@ -55,13 +55,19 @@ pub struct Transaction {
 }*/
 
 impl Transaction {
-    pub fn new() -> Self {
+    pub fn random() -> Self {
         Self {
             //timestamp: 0,
             //payload: Payload(vec![]),
             //parent: ParentHash(Digest::default()),
             //votes: BTreeSet::new(),
             digest: Digest::random(),
+        }
+    }
+
+    pub fn default() -> Self {
+        Self {
+            digest: Digest::default(),
         }
     }
 

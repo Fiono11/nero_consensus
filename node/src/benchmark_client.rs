@@ -14,6 +14,7 @@ use tokio::time::{interval, sleep, Duration, Instant};
 use tokio_util::codec::{Framed, LengthDelimitedCodec};
 use crypto::{Digest, PublicKey};
 use primary::{ElectionHash, now, ParentHash, Payload, Primary, PrimaryMessage, PrimaryVote, Transaction};
+use primary::PrimaryMessage::Transactions;
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -119,7 +120,8 @@ impl Client {
             let present = Instant::now();
 
             for x in 0..self.rate {
-                let mut tx = Transaction::new();
+                //let mut tx = Transaction::new();
+                let mut tx = Transaction::default();
                 /*if x == counter % burst {
                     // NOTE: This log entry is used to compute performance.
                     info!("Sending sample transaction {}", counter);
