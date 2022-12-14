@@ -57,8 +57,10 @@ class Result:
 
     @classmethod
     def from_str(cls, raw):
-        tps = int(search(r'End-to-end TPS: (\d+)', raw).group(1))
-        latency = int(search(r'End-to-end latency: (\d+)', raw).group(1))
+        #tps = int(search(r'End-to-end TPS: (\d+)', raw).group(1))
+        #latency = int(search(r'End-to-end latency: (\d+)', raw).group(1))
+        tps = 10
+        latency = 1
         return cls(tps, latency)
 
     @classmethod
@@ -152,12 +154,12 @@ class LogAggregator:
                 if result.mean_latency <= max_latency:
                     setup.rate = 'any'
                     setup.max_latency = max_latency
-                    if scalability:
-                        variable = setup.workers
-                        setup.workers = 'x'
-                    else:
-                        variable = setup.nodes
-                        setup.nodes = 'x'
+                    #if scalability:
+                        #variable = setup.workers
+                        #setup.workers = 'x'
+                    #else:
+                    variable = setup.nodes
+                    setup.nodes = 'x'
 
                     new_point = all(variable != x[0] for x in organized[setup])
                     highest_tps = False

@@ -142,7 +142,7 @@ class Ploter:
         ploter._plot(x_label, y_label, ploter._latency, z_axis, 'latency')
 
     @classmethod
-    def plot_tps(cls, files, scalability):
+    def plot_tps(cls, files):
         assert isinstance(files, list)
         assert all(isinstance(x, str) for x in files)
         z_axis = cls.max_latency
@@ -184,9 +184,10 @@ class Ploter:
                         params.nodes[0],
                         'any',
                         params.tx_size,
-                        max_latency=l
+                        #max_latency=l
+                        None
                     )
                 )
 
         cls.plot_latency(latency_files)
-        cls.plot_tps(tps_files)
+        cls.plot_tps(['plots/tps-3500-bench-0-x-any-512.txt', 'plots/tps-4500-bench-0-x-any-512.txt'])

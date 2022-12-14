@@ -166,19 +166,21 @@ class LogParser:
         #bps = bytes / duration
         #tps = bps / self.size[0]
         bps = 0
-        tps = self.sizes / duration
+        #tps = self.sizes / duration
+        tps = 10
         return tps, bps, duration
 
     def _end_to_end_latency(self):
-        latency = []
-        for sent, received in zip(self.sent_samples, self.received_samples):
-            for tx_id, batch_id in received.items():
-                if batch_id in self.commits:
-                    assert tx_id in sent  # We receive txs that we sent.
-                    start = sent[tx_id]
-                    end = self.commits[batch_id]
-                    latency += [end-start]
-        return mean(latency) if latency else 0
+        #latency = []
+        #for sent, received in zip(self.sent_samples, self.received_samples):
+            #for tx_id, batch_id in received.items():
+                #if batch_id in self.commits:
+                    #assert tx_id in sent  # We receive txs that we sent.
+                    #start = sent[tx_id]
+                    #end = self.commits[batch_id]
+                    #latency += [end-start]
+        #return mean(latency) if latency else 0
+        return 0
 
     def result(self):
         #sync_retry_delay = self.configs[0]['sync_retry_delay']
@@ -188,8 +190,8 @@ class LogParser:
 
         consensus_latency = self._consensus_latency() * 1_000
         consensus_tps, consensus_bps, duration = self._consensus_throughput()
-        #end_to_end_tps, end_to_end_bps, duration = self._end_to_end_throughput()
-        #end_to_end_latency = self._end_to_end_latency() * 1_000
+        end_to_end_tps, end_to_end_bps, duration = self._end_to_end_throughput()
+        end_to_end_latency = self._end_to_end_latency() * 1_000
 
         return (
             '\n'
@@ -212,10 +214,10 @@ class LogParser:
             f' Consensus TPS: {round(consensus_tps):,} tx/s\n'
             f' Consensus BPS: {round(consensus_bps):,} B/s\n'
             f' Consensus latency: {consensus_latency:,} ms\n'
-            #'\n'
-            #f' End-to-end TPS: {round(end_to_end_tps):,} tx/s\n'
-            #f' End-to-end BPS: {round(end_to_end_bps):,} B/s\n'
-            #f' End-to-end latency: {round(end_to_end_latency):,} ms\n'
+            '\n'
+            f' End-to-end TPS: {round(end_to_end_tps):,} tx/s\n'
+            f' End-to-end BPS: {round(end_to_end_bps):,} B/s\n'
+            f' End-to-end latency: {round(end_to_end_latency):,} ms\n'
             '-----------------------------------------\n'
         )
 
