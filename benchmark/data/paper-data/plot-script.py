@@ -421,7 +421,7 @@ class Ploter:
 
 if __name__ == '__main__':
     max_latencies = [3_000, 5_000]  # For TPS graphs.
-    all_systems = ['tusk', 'narwhal-hs', 'batched-hs', 'baseline-hs']
+    all_systems = ['narwhal-hs']
 
     # Parse the results.
     for system in all_systems:
@@ -455,13 +455,13 @@ if __name__ == '__main__':
 
     # Plot 'Scalability latency' graph.
     ploter = Ploter(height=3.6)
-    for system in ['tusk', 'narwhal-hs']:
+    for system in ['narwhal-hs']:
         ploter.plot_latency(system, [0], [4], [4, 7, 10], 512)
     ploter.finalize('scalability-latency', legend_cols=2)
 
     # Plot 'Scalability tps' graph.
     ploter = Ploter(height=3.6)
-    for system in ['tusk', 'narwhal-hs']:
+    for system in ['narwhal-hs']:
         ploter.plot_tps(system, [0], [4], [1, 4, 7, 10], 512, max_latencies)
     ploter.finalize('scalability-tps', legend_cols=1)
 
